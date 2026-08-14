@@ -1,0 +1,62 @@
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: '0 3 * * *'
+name: Test
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        go-version: [1.26.x]
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      CGO_ENABLED: 0
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    - name: Install Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ matrix.go-version }}
+    - name: Vet
+      run: go vet ./...
+    - name: Test
+      run: go test ./...
+    - name: Test noasm
+      if: matrix.os == 'ubuntu-latest'
+      run: go test -tags noasm ./...
+    - name: Vet arm64 and riscv64
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        GOARCH=arm64 go vet ./...
+        GOARCH=riscv64 GORISCV64=rva23u64 go vet ./...
+
+  fuzz:
+    if: github.event_name == 'schedule'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - pkg: ./vp8/
+          target: FuzzDecodeFrame
+        - pkg: ./webp/
+          target: FuzzDecode
+        - pkg: ./webp/
+          target: FuzzDecodeVP8L
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-go@v5
+      with:
+        go-version: 1.26.x
+    - name: Fuzz
+      run: go test ${{ matrix.pkg }} -run XXX -fuzz ${{ matrix.target }} -fuzztime 10m -fuzzminimizetime 5s
+    - name: Upload failing input
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: fuzz-${{ matrix.target }}
+        path: ${{ matrix.pkg }}testdata/fuzz/
