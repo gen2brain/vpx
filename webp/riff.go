@@ -3,6 +3,7 @@ package webp
 import (
 	"encoding/binary"
 	"errors"
+	"math"
 )
 
 // ErrInvalid is returned for a file that is not a well formed WebP.
@@ -41,10 +42,11 @@ const (
 	bitstreamHeader = 16
 
 	maxChunkPayload = 0xfffffffe
+	maxSourceSize   = min(maxChunkPayload, math.MaxInt)
 	maxCanvasSize   = 1 << 24
 	maxImageArea    = 1 << 32
-	maxStillArea    = 1 << 28
-	maxCanvasArea   = 1 << 26
+	maxStillArea    = min(1<<28, math.MaxInt>>6)
+	maxCanvasArea   = min(1<<26, math.MaxInt>>8)
 )
 
 type fourCC [4]byte

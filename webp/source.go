@@ -26,7 +26,7 @@ func srcFor(r io.Reader) (*source, error) {
 		cur, err1 := sk.Seek(0, io.SeekCurrent)
 		end, err2 := sk.Seek(0, io.SeekEnd)
 
-		if err1 == nil && err2 == nil && end > cur && end-cur <= maxChunkPayload {
+		if err1 == nil && err2 == nil && end > cur && end-cur <= maxSourceSize {
 			n := int(end - cur)
 
 			return &source{r: io.NewSectionReader(ra, cur, int64(n)), size: n}, nil
@@ -110,9 +110,9 @@ func (s *source) nextChunk(off, end int) (chunk, int, error) {
 	c := chunk{off: off + chunkHeaderSize, size: int(size)}
 	copy(c.id[:], h[:4])
 
-	adv := c.off + c.size + c.size&1
-	if adv > end {
-		adv = end
+	adv := c.off + c.size
+	if adv < end {
+		adv += c.size & 1
 	}
 
 	return c, adv, nil

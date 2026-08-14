@@ -34,14 +34,20 @@ func appendChunk(b []byte, id string, payload []byte) []byte {
 }
 
 func writeFile(w io.Writer, hdr []byte, chunks []chunkOut) error {
-	size := 4
+	size := uint64(4)
 
 	for _, c := range chunks {
-		if len(c.payload) > maxChunkPayload {
+		n := uint64(len(c.payload))
+
+		if n > maxChunkPayload {
 			return ErrEncode
 		}
 
-		size += chunkHeaderSize + len(c.payload) + len(c.payload)&1
+		size += chunkHeaderSize + n + n&1
+	}
+
+	if size > maxChunkPayload {
+		return ErrEncode
 	}
 
 	copy(hdr[0:], fccRIFF)

@@ -28,11 +28,15 @@ jobs:
     - name: Test noasm
       if: matrix.os == 'ubuntu-latest'
       run: go test -tags noasm ./...
-    - name: Vet arm64 and riscv64
+    - name: Vet arm64, riscv64 and 386
       if: matrix.os == 'ubuntu-latest'
       run: |
         GOARCH=arm64 go vet ./...
         GOARCH=riscv64 GORISCV64=rva23u64 go vet ./...
+        GOARCH=386 go vet ./...
+    - name: Test 386
+      if: matrix.os == 'ubuntu-latest'
+      run: GOARCH=386 go test ./...
 
   fuzz:
     if: github.event_name == 'schedule'

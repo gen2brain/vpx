@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -174,6 +175,29 @@ func TestParseChunkSizeOverflow(t *testing.T) {
 
 	if _, err := parse(memSource(b)); err == nil {
 		t.Error("parsed, want error")
+	}
+}
+
+func TestCanvasAreaLimit(t *testing.T) {
+	b := bytes.Clone(readFile(t, "lossy_alpha.webp"))
+
+	putUint24(b[24:27], 1<<16-1)
+	putUint24(b[27:30], 1<<13-1)
+
+	var before, after runtime.MemStats
+
+	runtime.ReadMemStats(&before)
+
+	_, err := Decode(bytes.NewReader(b))
+
+	runtime.ReadMemStats(&after)
+
+	if !errors.Is(err, ErrUnsupported) {
+		t.Errorf("err = %v, want %v", err, ErrUnsupported)
+	}
+
+	if n := after.TotalAlloc - before.TotalAlloc; n > 1<<20 {
+		t.Errorf("allocated %d bytes, want the canvas never to be reached", n)
 	}
 }
 
