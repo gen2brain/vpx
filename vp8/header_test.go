@@ -2,6 +2,7 @@ package vp8
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -68,6 +69,29 @@ func TestParseFrameHeader(t *testing.T) {
 	}
 }
 
+// An inter frame has a frame tag and nothing else, which is what a caller
+// routing a video stream reads. Decoding one is what is unsupported.
+func TestParseFrameHeaderInter(t *testing.T) {
+	h, err := ParseFrameHeader(interFrame())
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+
+	if h.KeyFrame || !h.Show || h.PartSize != 42 {
+		t.Errorf("header = %+v", h)
+	}
+
+	if h.Width != 0 || h.Height != 0 {
+		t.Errorf("dimensions %dx%d, want none", h.Width, h.Height)
+	}
+
+	var d Decoder
+
+	if _, err := d.DecodeFrame(interFrame()); !errors.Is(err, ErrUnsupported) {
+		t.Errorf("DecodeFrame err = %v, want %v", err, ErrUnsupported)
+	}
+}
+
 func TestParseFrameHeaderProfile(t *testing.T) {
 	for profile := range 4 {
 		h, err := ParseFrameHeader(keyFrame(profile, 1, 16, 16, 0, 0, true))
@@ -106,7 +130,6 @@ func TestParseFrameHeaderInvalid(t *testing.T) {
 		{"zero width", zeroWidth, ErrInvalid},
 		{"zero height", zeroHeight, ErrInvalid},
 		{"bad profile", badProfile, ErrInvalid},
-		{"inter frame", interFrame(), ErrUnsupported},
 	}
 
 	for _, tt := range tests {
@@ -154,4 +177,63 @@ func interFrame() []byte {
 	b[0] |= 1
 
 	return b
+}
+
+// decodeSurvives reports a panic as a message. Any error is fine; a panic on
+// untrusted input is not.
+func decodeSurvives(b []byte) (msg string) {
+	defer func() {
+		if r := recover(); r != nil {
+			msg = fmt.Sprintf("panic: %v", r)
+		}
+	}()
+
+	ParseFrameHeader(b)
+
+	d := Decoder{SizeLimit: 1 << 20}
+	d.DecodeFrame(b)
+
+	return ""
+}
+
+// TestMalformedFrames truncates and corrupts every bundled frame. The decoder
+// is allowed to reject any of them and not to panic on any of them.
+func TestMalformedFrames(t *testing.T) {
+	names, err := filepath.Glob(filepath.Join("testdata", "*.vp8"))
+	if err != nil || len(names) == 0 {
+		t.Skip("no bundled frames")
+	}
+
+	for _, path := range names {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		name := filepath.Base(path)
+
+		for _, frac := range []int{0, 1, 2, 3, 5, 7, 11, 16, 32, 48, 63} {
+			n := len(data) * frac / 64
+
+			if msg := decodeSurvives(data[:n]); msg != "" {
+				t.Errorf("%s truncated to %d/%d: %s", name, n, len(data), msg)
+			}
+		}
+
+		for _, off := range []int{0, 1, 2, 3, 6, 9, 11, 33, 97, 401, 1013, 4099} {
+			if off >= len(data) {
+				continue
+			}
+
+			for _, bit := range []uint{0, 3, 7} {
+				bad := make([]byte, len(data))
+				copy(bad, data)
+				bad[off] ^= 1 << bit
+
+				if msg := decodeSurvives(bad); msg != "" {
+					t.Errorf("%s bit %d of byte %d flipped: %s", name, bit, off, msg)
+				}
+			}
+		}
+	}
 }

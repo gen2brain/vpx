@@ -57,6 +57,15 @@ func decode(s *source, o Options, all bool) (*WEBP, error) {
 		return nil, err
 	}
 
+	limit := uint64(maxStillArea)
+	if c.animated() {
+		limit = maxCanvasArea
+	}
+
+	if uint64(c.width)*uint64(c.height) > limit {
+		return nil, ErrUnsupported
+	}
+
 	var ret *WEBP
 
 	if c.animated() {

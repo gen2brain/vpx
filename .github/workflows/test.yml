@@ -46,6 +46,12 @@ jobs:
           target: FuzzDecode
         - pkg: ./webp/
           target: FuzzDecodeVP8L
+        - pkg: ./webp/
+          target: FuzzEncodeLossless
+        - pkg: ./webp/
+          target: FuzzEncodeLossy
+        - pkg: ./webp/
+          target: FuzzEncodeAll
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4

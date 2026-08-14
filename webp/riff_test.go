@@ -515,3 +515,67 @@ func TestDecodeAllocs(t *testing.T) {
 		})
 	}
 }
+
+// fileSurvives reports a panic as a message. Any error is fine; a panic on
+// untrusted input is not.
+func fileSurvives(b []byte) (msg string) {
+	defer func() {
+		if r := recover(); r != nil {
+			msg = fmt.Sprintf("panic: %v", r)
+		}
+	}()
+
+	DecodeConfig(bytes.NewReader(b))
+	Decode(bytes.NewReader(b))
+	Decode(bytes.NewReader(b), Options{ToRGBA: true})
+	Decode(bytes.NewReader(b), Options{ToYCbCr: true, AlphaDither: 100})
+	DecodeAll(bytes.NewReader(b))
+	DecodeExif(bytes.NewReader(b))
+
+	return ""
+}
+
+// TestMalformedFiles truncates and corrupts every bundled file, through every
+// entry point. The decoder is allowed to reject any of them and not to panic
+// on any of them.
+func TestMalformedFiles(t *testing.T) {
+	names, err := filepath.Glob(filepath.Join("testdata", "*.webp"))
+	if err != nil || len(names) == 0 {
+		t.Skip("no bundled files")
+	}
+
+	for _, path := range names {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		name := filepath.Base(path)
+
+		for _, frac := range []int{0, 1, 2, 3, 5, 7, 11, 16, 32, 48, 63} {
+			n := len(data) * frac / 64
+
+			if msg := fileSurvives(data[:n]); msg != "" {
+				t.Errorf("%s truncated to %d/%d: %s", name, n, len(data), msg)
+			}
+		}
+
+		// The offsets cover the RIFF header, the first chunk header, the
+		// bitstream header and a spread of payload.
+		for _, off := range []int{0, 4, 8, 12, 16, 20, 23, 29, 37, 101, 409, 1021, 4099} {
+			if off >= len(data) {
+				continue
+			}
+
+			for _, bit := range []uint{0, 3, 7} {
+				bad := make([]byte, len(data))
+				copy(bad, data)
+				bad[off] ^= 1 << bit
+
+				if msg := fileSurvives(bad); msg != "" {
+					t.Errorf("%s bit %d of byte %d flipped: %s", name, bit, off, msg)
+				}
+			}
+		}
+	}
+}

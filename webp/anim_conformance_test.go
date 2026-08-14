@@ -92,12 +92,9 @@ func readAnimRef(path string) (*animRef, error) {
 func TestConformanceAnimation(t *testing.T) {
 	bin := animRefBin(t)
 
-	names, err := filepath.Glob(filepath.Join(conformanceRoot(t), "valid", "*.webp"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	names := corpusFiles(t)
 
-	const baseline = 1
+	const baseline = 7
 
 	out := filepath.Join(t.TempDir(), "ref.bin")
 

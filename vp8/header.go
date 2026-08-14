@@ -103,8 +103,10 @@ func (h *filterHeader) parse(d *boolDec) {
 	}
 }
 
-// ParseFrameHeader reads the uncompressed header off the front of a frame. It
-// is what a caller needing only the dimensions has to read.
+// ParseFrameHeader reads the uncompressed header off the front of a frame: the
+// frame tag every frame carries, and the picture header a key frame adds. An
+// inter frame parses to a header with no dimensions, because it has none; only
+// [Decoder.DecodeFrame] refuses to decode one.
 func ParseFrameHeader(b []byte) (FrameHeader, error) {
 	var h FrameHeader
 
@@ -124,7 +126,7 @@ func ParseFrameHeader(b []byte) (FrameHeader, error) {
 	}
 
 	if !h.KeyFrame {
-		return h, ErrUnsupported
+		return h, nil
 	}
 
 	if len(b) < frameTagSize+keyFrameHdrSize {

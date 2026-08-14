@@ -43,6 +43,8 @@ const (
 	maxChunkPayload = 0xfffffffe
 	maxCanvasSize   = 1 << 24
 	maxImageArea    = 1 << 32
+	maxStillArea    = 1 << 28
+	maxCanvasArea   = 1 << 26
 )
 
 type fourCC [4]byte

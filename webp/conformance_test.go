@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -41,17 +42,28 @@ func conformanceRoot(t *testing.T) string {
 	return ""
 }
 
-func conformanceFiles(t *testing.T, sub string) []string {
+// corpusFiles is every still the suites read: the conformance corpus, plus the
+// tree tools/gencorpus.sh writes if one of the CONFORMANCE_DIR entries has it.
+// The corpus has few lossless, alpha and animated files, so the generated ones
+// are where most of the coverage for those comes from.
+func corpusFiles(t *testing.T) []string {
 	t.Helper()
 
-	names, err := filepath.Glob(filepath.Join(conformanceRoot(t), sub, "*.webp"))
+	names, err := filepath.Glob(filepath.Join(conformanceRoot(t), "valid", "*.webp"))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if len(names) == 0 {
-		t.Skipf("no files in %s", sub)
+	for _, dir := range conformanceDirs(t) {
+		more, err := filepath.Glob(filepath.Join(dir, "generated", "*.webp"))
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		names = append(names, more...)
 	}
+
+	sort.Strings(names)
 
 	return names
 }
@@ -199,12 +211,9 @@ func dwebpPAM(bin, path, out string) ([]byte, int, int, error) {
 func TestConformanceLossless(t *testing.T) {
 	bin := dwebpBin(t)
 
-	names, err := filepath.Glob(filepath.Join(conformanceRoot(t), "valid", "*.webp"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	names := corpusFiles(t)
 
-	const baseline = 4
+	const baseline = 34
 
 	out := filepath.Join(t.TempDir(), "ref.pam")
 
@@ -295,12 +304,9 @@ func comparePixels(got, want []byte, w, h int) string {
 func TestConformanceAlpha(t *testing.T) {
 	bin := dwebpBin(t)
 
-	names, err := filepath.Glob(filepath.Join(conformanceRoot(t), "valid", "*.webp"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	names := corpusFiles(t)
 
-	const baseline = 1
+	const baseline = 19
 
 	out := filepath.Join(t.TempDir(), "ref.yuv")
 
@@ -387,9 +393,9 @@ func comparePlaneBytes(got []byte, stride int, want []byte, w, h int) string {
 // frame count. Set CONFORMANCE_DIR to run it.
 func TestConformanceContainer(t *testing.T) {
 	bin := webpInfoBin(t)
-	files := conformanceFiles(t, "valid")
+	files := corpusFiles(t)
 
-	const baseline = 225
+	const baseline = 278
 
 	var passed int
 
@@ -462,12 +468,9 @@ func TestConformanceContainer(t *testing.T) {
 func TestConformanceToRGBA(t *testing.T) {
 	bin := dwebpBin(t)
 
-	names, err := filepath.Glob(filepath.Join(conformanceRoot(t), "valid", "*.webp"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	names := corpusFiles(t)
 
-	const baseline = 223
+	const baseline = 271
 
 	out := filepath.Join(t.TempDir(), "ref.pam")
 
@@ -529,12 +532,9 @@ func TestConformanceToRGBA(t *testing.T) {
 func TestConformanceToYCbCr(t *testing.T) {
 	bin := dwebpBin(t)
 
-	names, err := filepath.Glob(filepath.Join(conformanceRoot(t), "valid", "*.webp"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	names := corpusFiles(t)
 
-	const baseline = 4
+	const baseline = 34
 
 	out := filepath.Join(t.TempDir(), "ref.yuv")
 

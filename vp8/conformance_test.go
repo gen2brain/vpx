@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -15,6 +16,28 @@ import (
 
 // The corpora are large and live outside the repository. CONFORMANCE_DIR is a
 // colon separated list of them.
+func corpusFiles(t *testing.T) []string {
+	t.Helper()
+
+	names, err := filepath.Glob(filepath.Join(conformanceRoot(t), "valid", "*.webp"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, dir := range strings.Split(os.Getenv("CONFORMANCE_DIR"), ":") {
+		more, err := filepath.Glob(filepath.Join(dir, "generated", "*.webp"))
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		names = append(names, more...)
+	}
+
+	sort.Strings(names)
+
+	return names
+}
+
 func conformanceRoot(t *testing.T) string {
 	t.Helper()
 
@@ -167,12 +190,9 @@ func webpInfoBitstream(bin, path string) (bitstream, error) {
 func TestConformanceHeader(t *testing.T) {
 	bin := webpInfoBin(t)
 
-	names, err := filepath.Glob(filepath.Join(conformanceRoot(t), "valid", "*.webp"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	names := corpusFiles(t)
 
-	const baseline = 219
+	const baseline = 237
 
 	var passed, skipped int
 
@@ -270,12 +290,9 @@ func comparePlanes(name string, got []byte, stride int, want []byte, w, h int) s
 func TestConformanceDecode(t *testing.T) {
 	bin := dwebpBin(t)
 
-	names, err := filepath.Glob(filepath.Join(conformanceRoot(t), "valid", "*.webp"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	names := corpusFiles(t)
 
-	const baseline = 219
+	const baseline = 237
 
 	out := filepath.Join(t.TempDir(), "ref.yuv")
 

@@ -93,6 +93,10 @@ func (c *container) features() (features, error) {
 			return f, err
 		}
 
+		if !h.KeyFrame {
+			return f, ErrUnsupported
+		}
+
 		f.width, f.height = h.Width, h.Height
 	case fccVP8L:
 		h, err := parseVP8LHeader(b)

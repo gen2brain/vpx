@@ -86,7 +86,7 @@ func (d *Decoder) parseHeader(data []byte) error {
 		return err
 	}
 
-	if !h.Show {
+	if !h.KeyFrame || !h.Show {
 		return ErrUnsupported
 	}
 

@@ -815,3 +815,107 @@ func TestEncodeAllocs(t *testing.T) {
 		})
 	}
 }
+
+func fuzzImage(w, h uint8, pix []byte) *image.NRGBA {
+	m := image.NewNRGBA(image.Rect(0, 0, int(w)%64+1, int(h)%64+1))
+
+	if len(pix) == 0 {
+		return m
+	}
+
+	for i := range m.Pix {
+		m.Pix[i] = pix[i%len(pix)]
+	}
+
+	return m
+}
+
+func FuzzEncodeLossless(f *testing.F) {
+	f.Add(uint8(1), uint8(1), []byte{0})
+	f.Add(uint8(16), uint8(16), []byte{1, 2, 3, 4})
+	f.Add(uint8(63), uint8(7), []byte{255, 0, 128, 255, 9})
+
+	f.Fuzz(func(t *testing.T, w, h uint8, pix []byte) {
+		src := fuzzImage(w, h, pix)
+
+		var buf bytes.Buffer
+
+		if err := Encode(&buf, src, Options{Lossless: true, Exact: true}); err != nil {
+			t.Fatalf("encode: %v", err)
+		}
+
+		got, err := Decode(bytes.NewReader(buf.Bytes()))
+		if err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+
+		out, ok := got.(*image.NRGBA)
+		if !ok {
+			t.Fatalf("decoded %T, want *image.NRGBA", got)
+		}
+
+		if !out.Bounds().Eq(src.Bounds()) {
+			t.Fatalf("bounds %v, want %v", out.Bounds(), src.Bounds())
+		}
+
+		for y := range src.Bounds().Dy() {
+			row := src.Pix[src.PixOffset(0, y):][:4*src.Bounds().Dx()]
+
+			if have := out.Pix[out.PixOffset(0, y):][:len(row)]; !bytes.Equal(have, row) {
+				t.Fatalf("row %d differs", y)
+			}
+		}
+	})
+}
+
+func FuzzEncodeLossy(f *testing.F) {
+	f.Add(uint8(1), uint8(1), uint8(75), []byte{0})
+	f.Add(uint8(16), uint8(16), uint8(0), []byte{1, 2, 3, 4})
+	f.Add(uint8(63), uint8(7), uint8(100), []byte{255, 0, 128, 255, 9})
+
+	f.Fuzz(func(t *testing.T, w, h, quality uint8, pix []byte) {
+		src := fuzzImage(w, h, pix)
+
+		var buf bytes.Buffer
+
+		if err := Encode(&buf, src, Options{Quality: int(quality) % 101}); err != nil {
+			t.Fatalf("encode: %v", err)
+		}
+
+		got, err := Decode(bytes.NewReader(buf.Bytes()))
+		if err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+
+		if !got.Bounds().Eq(src.Bounds()) {
+			t.Fatalf("bounds %v, want %v", got.Bounds(), src.Bounds())
+		}
+	})
+}
+
+func FuzzEncodeAll(f *testing.F) {
+	f.Add(uint8(8), uint8(8), true, []byte{1, 2, 3, 4}, []byte{9})
+	f.Add(uint8(3), uint8(5), false, []byte{0}, []byte{255, 1})
+
+	f.Fuzz(func(t *testing.T, w, h uint8, lossless bool, first, second []byte) {
+		anim := &WEBP{
+			Image: []image.Image{fuzzImage(w, h, first), fuzzImage(w, h, second)},
+			Delay: []int{10, 20},
+		}
+
+		var buf bytes.Buffer
+
+		if err := EncodeAll(&buf, anim, Options{Lossless: lossless}); err != nil {
+			t.Fatalf("encode: %v", err)
+		}
+
+		got, err := DecodeAll(bytes.NewReader(buf.Bytes()))
+		if err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+
+		if len(got.Image) != len(anim.Image) {
+			t.Fatalf("%d frames, want %d", len(got.Image), len(anim.Image))
+		}
+	})
+}
