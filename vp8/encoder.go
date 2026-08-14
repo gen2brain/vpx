@@ -44,6 +44,8 @@ type Encoder struct {
 	info []mbInfo
 	ctx  []mbCtx
 
+	buf frameBuffer
+
 	hdr boolEnc
 	tok boolEnc
 	out []byte
@@ -96,7 +98,10 @@ func (e *Encoder) setup(o EncodeOptions) {
 func (e *Encoder) alloc() {
 	e.rec.hdr = FrameHeader{KeyFrame: true, Show: true, Width: e.src.Width, Height: e.src.Height}
 	e.rec.mbW, e.rec.mbH = e.mbW, e.mbH
-	e.rec.alloc()
+
+	e.buf.alloc(e.mbW, e.mbH, e.src.Width, e.src.Height)
+	e.rec.pic = e.buf.pic
+	e.rec.allocRows()
 
 	if cap(e.info) < e.mbW*e.mbH {
 		e.info = make([]mbInfo, e.mbW*e.mbH)

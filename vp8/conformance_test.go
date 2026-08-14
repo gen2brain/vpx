@@ -3,7 +3,9 @@ package vp8
 import (
 	"bufio"
 	"bytes"
+	"crypto/md5"
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"os/exec"
@@ -493,4 +495,204 @@ func equal(a, b []int) bool {
 	}
 
 	return true
+}
+
+func vpxdecBin(t *testing.T) string {
+	t.Helper()
+
+	name := os.Getenv("VPXDEC_BIN")
+	if name == "" {
+		name = "vpxdec"
+	}
+
+	path, err := exec.LookPath(name)
+	if err != nil {
+		t.Skipf("no %s on PATH", name)
+	}
+
+	return path
+}
+
+func ivfFrames(b []byte) ([][]byte, error) {
+	if len(b) < 32 || string(b[:4]) != "DKIF" {
+		return nil, fmt.Errorf("not an IVF file")
+	}
+
+	var frames [][]byte
+
+	for off := int(binary.LittleEndian.Uint16(b[6:8])); off < len(b); {
+		if off+12 > len(b) {
+			return nil, fmt.Errorf("truncated frame header at %d", off)
+		}
+
+		n := int(binary.LittleEndian.Uint32(b[off : off+4]))
+		off += 12
+
+		if off+n > len(b) {
+			return nil, fmt.Errorf("truncated frame at %d", off)
+		}
+
+		frames = append(frames, b[off:off+n])
+		off += n
+	}
+
+	return frames, nil
+}
+
+// decodeIVF returns the md5 of every shown frame's I420 planes, which is what
+// vpxdec --i420 --md5 hashes.
+func decodeIVF(data []byte) (string, int, error) {
+	frames, err := ivfFrames(data)
+	if err != nil {
+		return "", 0, err
+	}
+
+	var d Decoder
+
+	h := md5.New()
+	shown := 0
+
+	for i, frame := range frames {
+		pic, err := d.DecodeFrame(frame)
+		if err != nil {
+			return "", i, err
+		}
+
+		if pic == nil {
+			continue
+		}
+
+		shown++
+
+		w, hgt := pic.Width, pic.Height
+
+		for y := range hgt {
+			h.Write(pic.Y[y*pic.YStride : y*pic.YStride+w])
+		}
+
+		cw, ch := (w+1)/2, (hgt+1)/2
+
+		for y := range ch {
+			h.Write(pic.U[y*pic.UVStride : y*pic.UVStride+cw])
+		}
+
+		for y := range ch {
+			h.Write(pic.V[y*pic.UVStride : y*pic.UVStride+cw])
+		}
+	}
+
+	return hex.EncodeToString(h.Sum(nil)), shown, nil
+}
+
+// TestConformanceVideo decodes the VP8 test vectors, which are the streams the
+// format is defined by, and requires the md5 of every frame to match what
+// vpxdec produces. Set CONFORMANCE_DIR to run it.
+func TestConformanceVideo(t *testing.T) {
+	bin := vpxdecBin(t)
+
+	var names []string
+
+	for _, dir := range strings.Split(os.Getenv("CONFORMANCE_DIR"), ":") {
+		more, err := filepath.Glob(filepath.Join(dir, "VP8-TEST-VECTORS", "*", "*.ivf"))
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		names = append(names, more...)
+	}
+
+	if len(names) == 0 {
+		t.Skip("no VP8-TEST-VECTORS in CONFORMANCE_DIR")
+	}
+
+	sort.Strings(names)
+
+	const baseline = 61
+
+	var passed, failed int
+
+	for _, path := range names {
+		name := filepath.Base(path)
+
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		out, err := exec.Command(bin, "--i420", "--md5", path).Output()
+		if err != nil {
+			t.Logf("%s: vpxdec: %v", name, err)
+
+			continue
+		}
+
+		want, _, _ := strings.Cut(strings.TrimSpace(string(out)), " ")
+
+		got, frame, err := decodeIVF(data)
+		if err != nil {
+			failed++
+
+			t.Errorf("%s: frame %d: %v", name, frame, err)
+
+			continue
+		}
+
+		if got != want {
+			failed++
+
+			t.Errorf("%s: md5 %s, want %s", name, got, want)
+
+			continue
+		}
+
+		passed++
+	}
+
+	t.Logf("%d/%d streams match vpxdec, %d failed", passed, len(names), failed)
+
+	if passed < baseline {
+		t.Errorf("%d streams match, baseline is %d", passed, baseline)
+	}
+}
+
+// BenchmarkDecodeVideo needs the test vectors, which live outside the
+// repository behind CONFORMANCE_DIR.
+func BenchmarkDecodeVideo(b *testing.B) {
+	var path string
+
+	for _, dir := range strings.Split(os.Getenv("CONFORMANCE_DIR"), ":") {
+		names, _ := filepath.Glob(filepath.Join(dir, "VP8-TEST-VECTORS", "*", "*-001.ivf"))
+		if len(names) > 0 {
+			path = names[0]
+
+			break
+		}
+	}
+
+	if path == "" {
+		b.Skip("no VP8-TEST-VECTORS in CONFORMANCE_DIR")
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	frames, err := ivfFrames(data)
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	b.SetBytes(int64(len(data)))
+	b.ReportAllocs()
+
+	for b.Loop() {
+		var d Decoder
+
+		for _, frame := range frames {
+			if _, err := d.DecodeFrame(frame); err != nil {
+				b.Fatal(err)
+			}
+		}
+	}
 }

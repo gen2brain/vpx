@@ -79,8 +79,6 @@ type filterHeader struct {
 }
 
 func (h *filterHeader) parse(d *boolDec) {
-	*h = filterHeader{}
-
 	h.simple = d.getFlag()
 	h.level = int(d.getBits(6))
 	h.sharpness = int(d.getBits(3))

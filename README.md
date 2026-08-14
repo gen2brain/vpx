@@ -30,13 +30,17 @@ A reader that is also an `io.ReaderAt` and an `io.Seeker`, such as an `*os.File`
 by range rather than read into memory: `DecodeConfig` on a 47 KB file touches 46 bytes of it,
 and `Decode` never reads metadata it does not need.
 
-The `vp8` package decodes the bitstream on its own, a frame at a time:
+The `vp8` package decodes the bitstream on its own, a frame at a time, and decodes video as
+well as the key frames a still is made of:
 
 ```go
 d := vp8.Decoder{}
 
 pic, err := d.DecodeFrame(data)
 ```
+
+A frame the stream marks as not shown updates the references and returns a nil picture. Every
+one of the 61 VP8 test vector streams decodes to the same bytes `vpxdec` produces.
 
 ### Encoding
 

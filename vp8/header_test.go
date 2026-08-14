@@ -69,8 +69,9 @@ func TestParseFrameHeader(t *testing.T) {
 	}
 }
 
-// An inter frame has a frame tag and nothing else, which is what a caller
-// routing a video stream reads. Decoding one is what is unsupported.
+// An inter frame carries a frame tag and nothing else, which is what a caller
+// routing a stream reads. One that arrives before any key frame has nothing to
+// predict from.
 func TestParseFrameHeaderInter(t *testing.T) {
 	h, err := ParseFrameHeader(interFrame())
 	if err != nil {
@@ -87,8 +88,8 @@ func TestParseFrameHeaderInter(t *testing.T) {
 
 	var d Decoder
 
-	if _, err := d.DecodeFrame(interFrame()); !errors.Is(err, ErrUnsupported) {
-		t.Errorf("DecodeFrame err = %v, want %v", err, ErrUnsupported)
+	if _, err := d.DecodeFrame(interFrame()); !errors.Is(err, ErrInvalid) {
+		t.Errorf("DecodeFrame err = %v, want %v", err, ErrInvalid)
 	}
 }
 

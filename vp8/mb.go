@@ -8,19 +8,39 @@ type mbData struct {
 	isI4x4    bool
 	skip      bool
 	skipped   bool
+	refFrame  uint8
+	mode      uint8
+	needClamp bool
 	nonZeroY  uint32
 	nonZeroUV uint32
 }
 
-func (m *mbData) filterFlags() uint8 {
-	f := m.segment & 3
+func (m *mbData) inter() bool { return m.refFrame != refIntra }
 
-	if m.isI4x4 {
-		f |= 1<<2 | 1<<3
+func (m *mbData) lfMode() uint8 {
+	if !m.inter() {
+		if m.isI4x4 {
+			return 0
+		}
+
+		return 1
 	}
 
-	if !m.skipped {
-		f |= 1 << 3
+	switch m.mode {
+	case mvZero:
+		return 1
+	case mvSplit:
+		return 3
+	}
+
+	return 2
+}
+
+func (m *mbData) filterFlags() uint8 {
+	f := m.segment&3 | m.lfMode()<<2 | m.refFrame<<4
+
+	if !m.skipped || m.isI4x4 {
+		f |= 1 << 6
 	}
 
 	return f
@@ -77,19 +97,21 @@ func parseBMode(d *boolDec, p *[numBModes - 1]uint8) uint8 {
 	return bHUPred
 }
 
-func (d *Decoder) parseIntraMode(mbX int) {
+func (d *Decoder) parseIntraMode(mbX, mbY int) {
 	m := &d.mb
 	top := d.intraT[4*mbX : 4*mbX+4 : 4*mbX+4]
 	left := &d.intraL
 
+	m.refFrame = refIntra
+	m.mode = 0
+	m.needClamp = false
+
 	m.segment = 0
 	if d.seg.updateMap {
-		if d.br.getBit(d.proba.segments[0]) == 0 {
-			m.segment = uint8(d.br.getBit(d.proba.segments[1]))
-		} else {
-			m.segment = uint8(d.br.getBit(d.proba.segments[2]) + 2)
-		}
+		m.segment = d.readSegmentID()
 	}
+
+	d.segmap[mbY*d.mbW+mbX] = m.segment
 
 	m.skip = false
 	if d.useSkipProb {

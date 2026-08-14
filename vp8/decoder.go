@@ -17,6 +17,37 @@ type proba struct {
 	bandsPtr [numBlockTypes][17]*bandProbs
 }
 
+type entropy struct {
+	bands   [numBlockTypes][numBands]bandProbs
+	mvProbs mvProbs
+	yProbs  [4]uint8
+	uvProbs [3]uint8
+}
+
+func (d *Decoder) saveEntropy() entropy {
+	return entropy{
+		bands:   d.proba.bands,
+		mvProbs: d.mvProbs,
+		yProbs:  d.yProbs,
+		uvProbs: d.uvProbs,
+	}
+}
+
+func (d *Decoder) restoreEntropy(e entropy) {
+	d.proba.bands = e.bands
+	d.mvProbs = e.mvProbs
+	d.yProbs = e.yProbs
+	d.uvProbs = e.uvProbs
+}
+
+func (d *Decoder) resetEntropy() {
+	d.proba.reset()
+
+	d.mvProbs = mvProbs(mvDefaultProbs)
+	d.yProbs = yModeProbs
+	d.uvProbs = uvModeProbs
+}
+
 func (p *proba) reset() {
 	for t := range numBlockTypes {
 		for b := range numBands {
@@ -43,6 +74,8 @@ type Decoder struct {
 
 	colorSpace int
 	clampType  int
+	sixtap     bool
+	fullPixel  int
 
 	useSkipProb bool
 	skipProb    uint8
@@ -51,15 +84,42 @@ type Decoder struct {
 	parts    [maxPartitions]boolDec
 	br       boolDec
 
-	mbW, mbH int
+	mbW, mbH       int
+	width, height  int
+	allocW, allocH int
 
 	filterType int
-	fStrengths [numSegments][2]fInfo
+	fStrengths [numSegments][numRefFrames][4]fInfo
 	fInfoRow   []uint8
 
 	// SizeLimit bounds the pixel area a frame may allocate. Zero means
 	// DefaultFrameSizeLimit.
 	SizeLimit int
+
+	frames    [numFrameBuffers]frameBuffer
+	refCnt    [numFrameBuffers]int
+	lastIdx   int
+	goldenIdx int
+	altIdx    int
+	newIdx    int
+	modes     []modeInfo
+	segmap    []uint8
+
+	refreshGolden bool
+	refreshAlt    bool
+	refreshLast   bool
+	refreshProbs  bool
+	copyGolden    int
+	copyAlt       int
+	signBias      [numRefFrames]bool
+	probIntra     uint8
+	probLast      uint8
+	probGF        uint8
+
+	mvProbs mvProbs
+	yProbs  [4]uint8
+	uvProbs [3]uint8
+	saved   entropy
 
 	mb         mbData
 	mbCtx      []mbCtx
@@ -86,22 +146,32 @@ func (d *Decoder) parseHeader(data []byte) error {
 		return err
 	}
 
-	if !h.KeyFrame || !h.Show {
-		return ErrUnsupported
+	if h.KeyFrame {
+		limit := d.SizeLimit
+		if limit <= 0 {
+			limit = DefaultFrameSizeLimit
+		}
+
+		if h.Width*h.Height > limit {
+			return ErrUnsupported
+		}
+
+		d.mbW = (h.Width + 15) / 16
+		d.mbH = (h.Height + 15) / 16
+		d.width, d.height = h.Width, h.Height
+	} else if d.mbW == 0 {
+		return ErrInvalid
 	}
 
-	limit := d.SizeLimit
-	if limit <= 0 {
-		limit = DefaultFrameSizeLimit
-	}
-
-	if h.Width*h.Height > limit {
-		return ErrUnsupported
-	}
-
+	h.Width, h.Height = d.width, d.height
 	d.hdr = h
-	d.mbW = (h.Width + 15) / 16
-	d.mbH = (h.Height + 15) / 16
+
+	d.sixtap = h.Profile == 0
+	d.fullPixel = -1
+
+	if h.Profile == 3 {
+		d.fullPixel = ^7
+	}
 
 	b := data[h.size():]
 	if h.PartSize > len(b) {
@@ -110,11 +180,17 @@ func (d *Decoder) parseHeader(data []byte) error {
 
 	d.br.init(b[:h.PartSize])
 
-	d.colorSpace = int(d.br.getBits(1))
-	d.clampType = int(d.br.getBits(1))
+	if h.KeyFrame {
+		d.colorSpace = int(d.br.getBits(1))
+		d.clampType = int(d.br.getBits(1))
 
-	d.seg = segmentHeader{}
-	d.proba.segments = [numSegments - 1]uint8{255, 255, 255}
+		d.seg = segmentHeader{}
+		d.filter = filterHeader{}
+		d.proba.segments = [numSegments - 1]uint8{255, 255, 255}
+		d.signBias = [numRefFrames]bool{}
+
+		d.resetEntropy()
+	}
 
 	d.seg.parse(&d.br, &d.proba)
 	d.filter.parse(&d.br)
@@ -130,9 +206,40 @@ func (d *Decoder) parseHeader(data []byte) error {
 	d.quant.parse(&d.br)
 	d.deriveQuant()
 
-	d.br.getFlag()
+	d.refreshGolden = true
+	d.refreshAlt = true
+	d.copyGolden = 0
+	d.copyAlt = 0
+
+	if !h.KeyFrame {
+		d.refreshGolden = d.br.getFlag()
+		d.refreshAlt = d.br.getFlag()
+
+		if !d.refreshGolden {
+			d.copyGolden = int(d.br.getBits(2))
+		}
+
+		if !d.refreshAlt {
+			d.copyAlt = int(d.br.getBits(2))
+		}
+
+		d.signBias[refGolden] = d.br.getFlag()
+		d.signBias[refAltRef] = d.br.getFlag()
+	}
+
+	d.refreshProbs = d.br.getFlag()
+
+	if !d.refreshProbs {
+		d.saved = d.saveEntropy()
+	}
+
+	d.refreshLast = h.KeyFrame || d.br.getFlag()
 
 	d.parseProba()
+
+	if !h.KeyFrame {
+		d.parseInterProba()
+	}
 
 	if d.br.eof {
 		return ErrInvalid
@@ -141,6 +248,26 @@ func (d *Decoder) parseHeader(data []byte) error {
 	d.precomputeFilterStrengths()
 
 	return nil
+}
+
+func (d *Decoder) parseInterProba() {
+	d.probIntra = uint8(d.br.getBits(8))
+	d.probLast = uint8(d.br.getBits(8))
+	d.probGF = uint8(d.br.getBits(8))
+
+	if d.br.getFlag() {
+		for i := range d.yProbs {
+			d.yProbs[i] = uint8(d.br.getBits(8))
+		}
+	}
+
+	if d.br.getFlag() {
+		for i := range d.uvProbs {
+			d.uvProbs[i] = uint8(d.br.getBits(8))
+		}
+	}
+
+	d.br.readMVProbs(&d.mvProbs)
 }
 
 func (d *Decoder) parsePartitions(b []byte) error {
@@ -177,12 +304,9 @@ func (d *Decoder) parseProba() {
 		for b := range numBands {
 			for c := range numCtx {
 				for p := range numProbas {
-					v := coeffProbs[t][b][c][p]
 					if d.br.getBit(coeffUpdateProbs[t][b][c][p]) != 0 {
-						v = uint8(d.br.getBits(8))
+						d.proba.bands[t][b][c][p] = uint8(d.br.getBits(8))
 					}
-
-					d.proba.bands[t][b][c][p] = v
 				}
 			}
 		}

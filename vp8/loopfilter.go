@@ -248,60 +248,81 @@ func (d *Decoder) precomputeFilterStrengths() {
 			}
 		}
 
-		for i4x4 := range 2 {
-			level := base
-
-			if d.filter.useDelta {
-				level += int(d.filter.refDelta[0])
-				if i4x4 != 0 {
-					level += int(d.filter.modeDelta[0])
-				}
-			}
-
-			level = min(max(level, 0), 63)
-
-			info := &d.fStrengths[s][i4x4]
-			*info = fInfo{}
-
-			if level == 0 {
-				continue
-			}
-
-			ilevel := level
-
-			if d.filter.sharpness > 0 {
-				if d.filter.sharpness > 4 {
-					ilevel >>= 2
-				} else {
-					ilevel >>= 1
+		for ref := range numRefFrames {
+			for mode := range 4 {
+				if ref == refIntra && mode > 1 {
+					continue
 				}
 
-				ilevel = min(ilevel, 9-d.filter.sharpness)
-			}
+				if ref != refIntra && mode == 0 {
+					continue
+				}
 
-			info.ilevel = max(ilevel, 1)
-			info.limit = 2*level + info.ilevel
-			info.hevThresh = 0
+				level := base
 
-			switch {
-			case level >= 40:
-				info.hevThresh = 2
-			case level >= 15:
-				info.hevThresh = 1
+				if d.filter.useDelta {
+					level += int(d.filter.refDelta[ref])
+
+					if ref != refIntra || mode == 0 {
+						level += int(d.filter.modeDelta[mode])
+					}
+				}
+
+				level = min(max(level, 0), 63)
+
+				d.setFilterInfo(&d.fStrengths[s][ref][mode], level)
 			}
 		}
+	}
+}
+
+func (d *Decoder) setFilterInfo(info *fInfo, level int) {
+	*info = fInfo{}
+
+	if level == 0 {
+		return
+	}
+
+	ilevel := level
+
+	if d.filter.sharpness > 0 {
+		if d.filter.sharpness > 4 {
+			ilevel >>= 2
+		} else {
+			ilevel >>= 1
+		}
+
+		ilevel = min(ilevel, 9-d.filter.sharpness)
+	}
+
+	info.ilevel = max(ilevel, 1)
+	info.limit = 2*level + info.ilevel
+	inter := 0
+	if !d.hdr.KeyFrame {
+		inter = 1
+	}
+
+	switch {
+	case level >= 40:
+		info.hevThresh = 2 + inter
+	case level >= 20:
+		info.hevThresh = 1 + inter
+	case level >= 15:
+		info.hevThresh = 1
+	default:
+		info.hevThresh = 0
 	}
 }
 
 func (d *Decoder) filterMB(mbX, mbY int) {
 	flags := d.fInfoRow[mbY*d.mbW+mbX]
 
-	f := d.fStrengths[flags&3][flags>>2&1]
+	f := d.fStrengths[flags&3][flags>>4&3][flags>>2&3]
 	if f.limit == 0 {
 		return
 	}
 
-	inner := flags>>3&1 != 0
+	inner := flags>>6&1 != 0
 
 	yStride := d.pic.YStride
 	yOff := mbY*16*yStride + mbX*16

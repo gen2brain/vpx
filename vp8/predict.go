@@ -15,6 +15,7 @@ const (
 )
 
 const (
+	bPred  = numBModes
 	dcPred = bDCPred
 	tmPred = bTMPred
 	vPred  = bVEPred

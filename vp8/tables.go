@@ -556,3 +556,108 @@ var acTable = [128]uint16{
 	155, 158, 161, 164, 167, 170, 173, 177, 181, 185, 189, 193, 197, 201, 205, 209,
 	213, 217, 221, 225, 229, 234, 239, 245, 249, 254, 259, 264, 269, 274, 279, 284,
 }
+
+// mvUpdateProbs gives the probability that each entry of mvProbs is replaced
+// in an inter frame header, one set for the row component and one for the column.
+var mvUpdateProbs = [2][19]uint8{
+	{
+		237, 246, 253, 253, 254, 254, 254, 254, 254, 254, 254, 254, 254, 254, 250, 250,
+		252, 254, 254,
+	},
+	{
+		231, 243, 245, 253, 254, 254, 254, 254, 254, 254, 254, 254, 254, 254, 251, 251,
+		254, 254, 254,
+	},
+}
+
+// mvDefaultProbs is the motion vector entropy a frame starts from: is-short,
+// sign, the seven short tree positions, then ten long magnitude bits.
+var mvDefaultProbs = [2][19]uint8{
+	{
+		162, 128, 225, 146, 172, 147, 214, 39, 156, 128, 129, 132, 75, 145, 178, 206,
+		239, 254, 254,
+	},
+	{
+		164, 128, 204, 170, 119, 235, 140, 230, 228, 128, 130, 130, 74, 148, 180, 203,
+		236, 254, 254,
+	},
+}
+
+// modeContexts holds the probabilities the inter mode is read with, indexed by
+// how much the neighbours agree.
+var modeContexts = [6][4]uint8{
+	{7, 1, 1, 143},
+	{14, 18, 14, 107},
+	{135, 64, 57, 68},
+	{60, 56, 128, 65},
+	{159, 134, 128, 34},
+	{234, 188, 128, 28},
+}
+
+// mbSplits maps each of the sixteen subblocks to its partition, for the four
+// ways a macroblock's motion can be split.
+var mbSplits = [4][16]uint8{
+	{0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1},
+	{0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1},
+	{0, 0, 1, 1, 0, 0, 1, 1, 2, 2, 3, 3, 2, 2, 3, 3},
+	{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15},
+}
+
+// mbSplitOffset gives the first subblock of each partition.
+var mbSplitOffset = [4][16]uint8{
+	{0, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+	{0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+	{0, 2, 8, 10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+	{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15},
+}
+
+// subMVRefProbs is indexed by whether the left and above vectors are zero and
+// whether they are equal.
+var subMVRefProbs = [8][3]uint8{
+	{147, 136, 18},
+	{223, 1, 34},
+	{106, 145, 1},
+	{208, 1, 1},
+	{179, 121, 1},
+	{223, 1, 34},
+	{179, 121, 1},
+	{208, 1, 1},
+}
+
+// yModeProbs, uvModeProbs and bModeProbs are the intra mode probabilities an
+// inter frame starts from; a key frame uses its context dependent tables instead.
+var yModeProbs = [4]uint8{
+	112, 86, 140, 37,
+}
+
+var uvModeProbs = [3]uint8{
+	162, 101, 204,
+}
+
+var bModeProbsInter = [9]uint8{
+	120, 90, 79, 133, 87, 85, 80, 111, 151,
+}
+
+// subPelFilters is the six tap interpolation of §14.3, and bilinearFilters the
+// two tap one the simple profiles use, both indexed by the eighth pel position.
+var subPelFilters = [8][6]int16{
+	{0, 0, 128, 0, 0, 0},
+	{0, -6, 123, 12, -1, 0},
+	{2, -11, 108, 36, -8, 1},
+	{0, -9, 93, 50, -6, 0},
+	{3, -16, 77, 77, -16, 3},
+	{0, -6, 50, 93, -9, 0},
+	{1, -8, 36, 108, -11, 2},
+	{0, -1, 12, 123, -6, 0},
+}
+
+var bilinearFilters = [8][2]int16{
+	{128, 0},
+	{112, 16},
+	{96, 32},
+	{80, 48},
+	{64, 64},
+	{48, 80},
+	{32, 96},
+	{16, 112},
+}

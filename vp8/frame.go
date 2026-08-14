@@ -15,26 +15,42 @@ var scan = [16]int{
 }
 
 func (d *Decoder) alloc() {
-	yStride := d.mbW * 16
-	uvStride := d.mbW * 8
+	d.allocFrames()
+	d.allocRows()
+}
 
-	ySize := yStride * d.mbH * 16
-	uvSize := uvStride * d.mbH * 8
+func (d *Decoder) allocFrames() {
+	if d.allocW != d.hdr.Width || d.allocH != d.hdr.Height {
+		d.allocW, d.allocH = d.hdr.Width, d.hdr.Height
 
-	if cap(d.pic.Y) < ySize {
-		d.pic.Y = make([]byte, ySize)
-		d.pic.U = make([]byte, uvSize)
-		d.pic.V = make([]byte, uvSize)
+		for i := range d.frames {
+			d.frames[i].pic = Picture{}
+		}
+
+		d.lastIdx, d.goldenIdx, d.altIdx = 0, 1, 2
+		d.refCnt = [numFrameBuffers]int{1, 1, 1, 0}
+
+		n := (d.mbW + 1) * (d.mbH + 1)
+
+		if cap(d.modes) < n {
+			d.modes = make([]modeInfo, n)
+		}
+
+		d.modes = d.modes[:n]
+
+		clear(d.modes)
+
+		if cap(d.segmap) < d.mbW*d.mbH {
+			d.segmap = make([]uint8, d.mbW*d.mbH)
+		}
+
+		d.segmap = d.segmap[:d.mbW*d.mbH]
+
+		clear(d.segmap)
 	}
+}
 
-	d.pic.Y = d.pic.Y[:ySize]
-	d.pic.U = d.pic.U[:uvSize]
-	d.pic.V = d.pic.V[:uvSize]
-	d.pic.YStride = yStride
-	d.pic.UVStride = uvStride
-	d.pic.Width = d.hdr.Width
-	d.pic.Height = d.hdr.Height
-
+func (d *Decoder) allocRows() {
 	if cap(d.intraT) < 4*d.mbW {
 		d.intraT = make([]uint8, 4*d.mbW)
 		d.mbCtx = make([]mbCtx, d.mbW+1)
@@ -153,7 +169,16 @@ func (d *Decoder) reconstructMB(mbX, mbY int) {
 
 	bits := m.nonZeroY
 
-	if m.isI4x4 {
+	if m.inter() {
+		d.predictInter(mbX, mbY)
+
+		if bits != 0 {
+			for n := range 16 {
+				doTransform(bits, m.coeffs[n*16:n*16+16], b, yOff+scan[n])
+				bits <<= 2
+			}
+		}
+	} else if m.isI4x4 {
 		d.fillTopRight(mbX, mbY)
 
 		for n := range 16 {
@@ -173,9 +198,11 @@ func (d *Decoder) reconstructMB(mbX, mbY int) {
 		}
 	}
 
-	uv := checkMode(mbX, mbY, int(m.uvMode))
-	predChroma8[uv](b, uOff)
-	predChroma8[uv](b, vOff)
+	if !m.inter() {
+		uv := checkMode(mbX, mbY, int(m.uvMode))
+		predChroma8[uv](b, uOff)
+		predChroma8[uv](b, vOff)
+	}
 
 	doUVTransform(m.nonZeroUV, m.coeffs[16*16:], b, uOff)
 	doUVTransform(m.nonZeroUV>>8, m.coeffs[20*16:], b, vOff)
@@ -229,7 +256,11 @@ func (d *Decoder) decodeFrame() error {
 		d.initRowContext(mbY)
 
 		for mbX := range d.mbW {
-			d.parseIntraMode(mbX)
+			if d.hdr.KeyFrame {
+				d.parseIntraMode(mbX, mbY)
+			} else {
+				d.parseInterModes(mbX, mbY)
+			}
 
 			if !d.decodeMB(br, mbX) {
 				return ErrInvalid
@@ -248,12 +279,14 @@ func (d *Decoder) decodeFrame() error {
 	}
 
 	d.filterFrame()
+	d.frames[d.newIdx].extend(d.mbW, d.mbH)
 
 	return nil
 }
 
-// DecodeFrame decodes one VP8 key frame. The picture it returns is owned by
-// the decoder and is valid until the next call.
+// DecodeFrame decodes one VP8 frame. The picture it returns is owned by the
+// decoder and is valid until the next call. A frame the stream marks as not
+// shown updates the references and returns a nil picture.
 func (d *Decoder) DecodeFrame(data []byte) (*Picture, error) {
 	if err := d.parseHeader(data); err != nil {
 		return nil, err
@@ -261,9 +294,26 @@ func (d *Decoder) DecodeFrame(data []byte) (*Picture, error) {
 
 	d.alloc()
 
+	d.newIdx = d.freeBuffer()
+	d.refCnt[d.newIdx] = 1
+
+	d.frames[d.newIdx].alloc(d.mbW, d.mbH, d.hdr.Width, d.hdr.Height)
+
+	d.pic = d.frames[d.newIdx].pic
+
 	if err := d.decodeFrame(); err != nil {
 		return nil, err
 	}
 
-	return &d.pic, nil
+	if !d.refreshProbs {
+		d.restoreEntropy(d.saved)
+	}
+
+	d.rotateBuffers()
+
+	if !d.hdr.Show {
+		return nil, nil
+	}
+
+	return &d.frames[d.newIdx].pic, nil
 }
