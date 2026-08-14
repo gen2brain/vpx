@@ -72,8 +72,24 @@ type colorCache struct {
 	data []uint32
 }
 
+func (c *colorCache) index(argb uint32) uint32 {
+	return argb * 0x1e35a7bd >> (32 - c.bits)
+}
+
 func (c *colorCache) insert(argb uint32) {
-	c.data[argb*0x1e35a7bd>>(32-c.bits)] = argb
+	c.data[c.index(argb)] = argb
+}
+
+func (c *colorCache) init(bits uint) {
+	c.bits = bits
+
+	if cap(c.data) < 1<<bits {
+		c.data = make([]uint32, 1<<bits)
+	}
+
+	c.data = c.data[:1<<bits]
+
+	clear(c.data)
 }
 
 type huffGroup struct {

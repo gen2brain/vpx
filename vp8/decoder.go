@@ -17,6 +17,20 @@ type proba struct {
 	bandsPtr [numBlockTypes][17]*bandProbs
 }
 
+func (p *proba) reset() {
+	for t := range numBlockTypes {
+		for b := range numBands {
+			for c := range numCtx {
+				p.bands[t][b][c] = coeffProbs[t][b][c]
+			}
+		}
+
+		for b := range 17 {
+			p.bandsPtr[t][b] = &p.bands[t][coeffBands[b]]
+		}
+	}
+}
+
 // Decoder decodes VP8 frames. The zero value is ready to use, and reusing one
 // across frames reuses its buffers.
 type Decoder struct {

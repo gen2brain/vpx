@@ -7,12 +7,9 @@
 A port of [libwebp](https://chromium.googlesource.com/webm/libwebp), byte-exact against it.
 No CGo, no dependencies.
 
-SIMD support for amd64 (AVX2), arm64 (NEON) and riscv64 (RVV, with `GORISCV64=rva23u64`).
-Build with `-tags noasm` for pure Go everywhere.
-
-**Under construction.** The decoder is done and byte-exact against libwebp; the encoder is
-not written yet. `docs/PLAN.md` has the design and the milestone table, `docs/STATUS.md` where
-it stands.
+**Under construction.** The decoder is done and byte-exact against libwebp. The encoder
+writes lossy, lossless, alpha and animation, and libwebp reads every file it produces, but it
+is bigger than `cwebp` at the same quality and the SIMD kernels are not written yet.
 
 ### Decoding
 
@@ -44,17 +41,29 @@ pic, err := d.DecodeFrame(data)
 ### Encoding
 
 ```go
-err := webp.Encode(w, img, &webp.Options{Quality: 90})
+err := webp.Encode(w, img, webp.Options{Quality: 90})
 ```
 
 `Options` selects the quality, the lossless mode, the speed/size method, and whether the RGB
-of fully transparent pixels is preserved. `webp.EncodeAll` writes an animation.
+of fully transparent pixels is preserved. `Options.Lossless` writes VP8L, which is exact.
+`webp.EncodeAll` writes an animation.
+
+The `vp8` package encodes a key frame on its own:
+
+```go
+e := vp8.Encoder{}
+
+data, err := e.Encode(pic, vp8.EncodeOptions{Quality: 90})
+```
 
 ### Supported
 
 Lossy (VP8) and lossless (VP8L) still images, alpha in both, animation with its disposal and
 blending, and the `VP8X` extended container with its ICC, Exif and XMP chunks. Every one of
 those decodes byte-exactly against libwebp.
+
+The encoder writes lossy and lossless stills, alpha, and animations. libwebp decodes what it
+writes to the same pixels this package does.
 
 ### License
 

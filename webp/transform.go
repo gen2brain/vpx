@@ -94,34 +94,34 @@ func selectPredictor(a, b, c uint32) uint32 {
 	return b
 }
 
-func predict(mode int, left uint32, px []uint32, top int) uint32 {
+func predict(mode int, left, topLeft, top, topRight uint32) uint32 {
 	switch mode {
 	case 1:
 		return left
 	case 2:
-		return px[top]
+		return top
 	case 3:
-		return px[top+1]
+		return topRight
 	case 4:
-		return px[top-1]
+		return topLeft
 	case 5:
-		return average3(left, px[top], px[top+1])
+		return average3(left, top, topRight)
 	case 6:
-		return average2(left, px[top-1])
+		return average2(left, topLeft)
 	case 7:
-		return average2(left, px[top])
+		return average2(left, top)
 	case 8:
-		return average2(px[top-1], px[top])
+		return average2(topLeft, top)
 	case 9:
-		return average2(px[top], px[top+1])
+		return average2(top, topRight)
 	case 10:
-		return average4(left, px[top-1], px[top], px[top+1])
+		return average4(left, topLeft, top, topRight)
 	case 11:
-		return selectPredictor(px[top], left, px[top-1])
+		return selectPredictor(top, left, topLeft)
 	case 12:
-		return clampedAddSubtractFull(left, px[top], px[top-1])
+		return clampedAddSubtractFull(left, top, topLeft)
 	case 13:
-		return clampedAddSubtractHalf(left, px[top], px[top-1])
+		return clampedAddSubtractHalf(left, top, topLeft)
 	}
 
 	return argbBlack
@@ -148,8 +148,9 @@ func applyPredictor(px []uint32, width, height, bits int, data []uint32) {
 
 		for x := 1; x < width; x++ {
 			i := base + x
+			t := i - width
 			mode := int(modes[x>>bits] >> 8 & 0xf)
-			px[i] = addPixels(px[i], predict(mode, px[i-1], px, i-width))
+			px[i] = addPixels(px[i], predict(mode, px[i-1], px[t-1], px[t], px[t+1]))
 		}
 	}
 }

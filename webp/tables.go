@@ -15,6 +15,19 @@ var codeToPlane = [120]uint8{
 	126, 97, 111, 80, 113, 127, 96, 112,
 }
 
+// planeToCode is the inverse of codeToPlane, indexed by the row above times
+// sixteen plus eight minus the column, and 255 where no short code exists.
+var planeToCode = [128]uint8{
+	96, 73, 55, 39, 23, 13, 5, 1, 255, 255, 255, 255, 255, 255, 255, 255,
+	101, 78, 58, 42, 26, 16, 8, 2, 0, 3, 9, 17, 27, 43, 59, 79,
+	102, 86, 62, 46, 32, 20, 10, 6, 4, 7, 11, 21, 33, 47, 63, 87,
+	105, 90, 70, 52, 37, 28, 18, 14, 12, 15, 19, 29, 38, 53, 71, 91,
+	110, 99, 82, 66, 48, 35, 30, 24, 22, 25, 31, 36, 49, 67, 83, 100,
+	115, 108, 94, 76, 64, 50, 44, 40, 34, 41, 45, 51, 65, 77, 95, 109,
+	118, 113, 103, 92, 80, 68, 60, 56, 54, 57, 61, 69, 81, 93, 104, 114,
+	119, 116, 111, 106, 97, 88, 84, 74, 72, 75, 85, 89, 98, 107, 112, 117,
+}
+
 // codeLengthOrder is the order the code length code lengths are written in.
 var codeLengthOrder = [19]uint8{
 	17, 18, 0, 1, 2, 3, 4, 5, 16, 6, 7, 8, 9, 10, 11, 12,

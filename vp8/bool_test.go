@@ -310,3 +310,94 @@ func BenchmarkBoolDecGetBit(b *testing.B) {
 		d.getBit(probs[i&255])
 	}
 }
+
+// TestBoolEncRoundTrip requires the encoder and the decoder to agree bit for
+// bit on a sequence with realistic probabilities.
+func TestBoolEncRoundTrip(t *testing.T) {
+	rng := rand.New(rand.NewPCG(31, 32))
+
+	for _, n := range []int{1, 2, 7, 64, 100000} {
+		bits := make([]int, n)
+		probs := make([]uint8, n)
+
+		for i := range bits {
+			bits[i] = rng.IntN(2)
+			probs[i] = uint8(rng.IntN(255) + 1)
+		}
+
+		var e boolEnc
+
+		e.init(nil)
+
+		for i := range bits {
+			e.putBit(bits[i], probs[i])
+		}
+
+		var d boolDec
+
+		d.init(e.finish())
+
+		for i := range bits {
+			if got := d.getBit(probs[i]); got != bits[i] {
+				t.Fatalf("n=%d: bit %d decoded as %d, want %d", n, i, got, bits[i])
+			}
+		}
+
+		if d.eof {
+			t.Errorf("n=%d: decoder ran past the end of what the encoder wrote", n)
+		}
+	}
+}
+
+func TestBoolEncCarry(t *testing.T) {
+	var e boolEnc
+
+	e.init(nil)
+
+	// A long run of ones at a high probability is what makes the encoder hold
+	// bytes back for a carry.
+	for range 4096 {
+		e.putBit(1, 254)
+	}
+
+	e.putBit(0, 2)
+
+	var d boolDec
+
+	d.init(e.finish())
+
+	for i := range 4096 {
+		if got := d.getBit(254); got != 1 {
+			t.Fatalf("bit %d decoded as %d, want 1", i, got)
+		}
+	}
+
+	if got := d.getBit(2); got != 0 {
+		t.Fatalf("last bit decoded as %d, want 0", got)
+	}
+}
+
+func TestBoolEncUniform(t *testing.T) {
+	rng := rand.New(rand.NewPCG(33, 34))
+
+	values := make([]uint32, 500)
+
+	var e boolEnc
+
+	e.init(nil)
+
+	for i := range values {
+		values[i] = rng.Uint32() & 0xfff
+		e.putBits(values[i], 12)
+	}
+
+	var d boolDec
+
+	d.init(e.finish())
+
+	for i, want := range values {
+		if got := d.getBits(12); got != want {
+			t.Fatalf("value %d: %#x, want %#x", i, got, want)
+		}
+	}
+}

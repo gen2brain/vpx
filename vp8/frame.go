@@ -123,21 +123,33 @@ func doUVTransform(bits uint32, in []int16, b []byte, off int) {
 	transformDCUV(in, b, off)
 }
 
-func (d *Decoder) reconstruct(mbX, mbY int) {
-	b := d.yuv[:]
-	m := &d.mb
-
+func (d *Decoder) loadNeighbours(mbX, mbY int) {
 	if mbX > 0 {
 		d.rotateLeft()
 	}
 
+	if mbY == 0 {
+		return
+	}
+
+	b := d.yuv[:]
 	top := &d.topSamples[mbX]
 
-	if mbY > 0 {
-		copy(b[yOff-bps:yOff-bps+16], top.y[:])
-		copy(b[uOff-bps:uOff-bps+8], top.u[:])
-		copy(b[vOff-bps:vOff-bps+8], top.v[:])
-	}
+	copy(b[yOff-bps:yOff-bps+16], top.y[:])
+	copy(b[uOff-bps:uOff-bps+8], top.u[:])
+	copy(b[vOff-bps:vOff-bps+8], top.v[:])
+}
+
+func (d *Decoder) reconstruct(mbX, mbY int) {
+	d.loadNeighbours(mbX, mbY)
+	d.reconstructMB(mbX, mbY)
+}
+
+func (d *Decoder) reconstructMB(mbX, mbY int) {
+	b := d.yuv[:]
+	m := &d.mb
+
+	top := &d.topSamples[mbX]
 
 	bits := m.nonZeroY
 

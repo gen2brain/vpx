@@ -2,6 +2,7 @@ package webp
 
 import (
 	"bytes"
+	"io"
 	"testing"
 )
 
@@ -43,6 +44,50 @@ func BenchmarkDecodeRGBA(b *testing.B) {
 
 			for b.Loop() {
 				if _, err := Decode(bytes.NewReader(data), Options{ToRGBA: true}); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkEncodeLossless(b *testing.B) {
+	for _, name := range []string{"simple.webp", "palette.webp", "lossless_alpha.webp"} {
+		img, err := Decode(bytes.NewReader(benchFile(b, name)))
+		if err != nil {
+			b.Fatal(err)
+		}
+
+		b.Run(name, func(b *testing.B) {
+			r := img.Bounds()
+
+			b.SetBytes(int64(4 * r.Dx() * r.Dy()))
+			b.ReportAllocs()
+
+			for b.Loop() {
+				if err := Encode(io.Discard, img, Options{Lossless: true}); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkEncodeLossy(b *testing.B) {
+	for _, name := range []string{"test.webp", "simple-rgb.webp", "lossy_alpha.webp"} {
+		img, err := Decode(bytes.NewReader(benchFile(b, name)))
+		if err != nil {
+			b.Fatal(err)
+		}
+
+		b.Run(name, func(b *testing.B) {
+			r := img.Bounds()
+
+			b.SetBytes(int64(4 * r.Dx() * r.Dy()))
+			b.ReportAllocs()
+
+			for b.Loop() {
+				if err := Encode(io.Discard, img, Options{Quality: 75}); err != nil {
 					b.Fatal(err)
 				}
 			}
