@@ -126,7 +126,7 @@ func TestFilterLoopsMatchScalar(t *testing.T) {
 }
 
 func TestFilterKernelsMatchScalar(t *testing.T) {
-	if vFilter16Asm == nil {
+	if vFilter16Asm == nil && hFilter16Asm == nil {
 		t.Skip("no kernels compiled in")
 	}
 
@@ -157,6 +157,17 @@ func TestFilterKernelsMatchScalar(t *testing.T) {
 		copy(gotV, src)
 
 		kind := iter & 7
+
+		switch kind {
+		case 0, 1, 2, 3:
+			if vFilter16Asm == nil {
+				continue
+			}
+		case 4, 5, 6, 7:
+			if hFilter16Asm == nil {
+				continue
+			}
+		}
 
 		switch kind {
 		case 0:
