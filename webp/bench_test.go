@@ -2,6 +2,8 @@ package webp
 
 import (
 	"bytes"
+	"image"
+	"image/draw"
 	"io"
 	"testing"
 )
@@ -31,6 +33,44 @@ func BenchmarkDecode(b *testing.B) {
 				}
 			}
 		})
+	}
+}
+
+func benchLarge(b *testing.B, opts Options) []byte {
+	b.Helper()
+
+	src, err := Decode(bytes.NewReader(benchFile(b, "test.webp")))
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	big := image.NewNRGBA(image.Rect(0, 0, 1920, 1080))
+
+	for y := 0; y < 1080; y += 512 {
+		for x := 0; x < 1920; x += 512 {
+			draw.Draw(big, image.Rect(x, y, x+512, y+512), src, src.Bounds().Min, draw.Src)
+		}
+	}
+
+	var buf bytes.Buffer
+
+	if err := Encode(&buf, big, opts); err != nil {
+		b.Fatal(err)
+	}
+
+	return buf.Bytes()
+}
+
+func BenchmarkDecodeLarge(b *testing.B) {
+	data := benchLarge(b, Options{Quality: 75})
+
+	b.SetBytes(int64(len(data)))
+	b.ReportAllocs()
+
+	for b.Loop() {
+		if _, err := Decode(bytes.NewReader(data)); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
 

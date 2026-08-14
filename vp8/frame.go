@@ -61,11 +61,11 @@ func (d *Decoder) allocRows() {
 	d.mbCtx = d.mbCtx[:d.mbW+1]
 	d.topSamples = d.topSamples[:d.mbW]
 
-	if cap(d.fInfoRow) < d.mbW*d.mbH {
-		d.fInfoRow = make([]uint8, d.mbW*d.mbH)
+	if cap(d.fInfoRow) < d.mbW {
+		d.fInfoRow = make([]uint8, d.mbW)
 	}
 
-	d.fInfoRow = d.fInfoRow[:d.mbW*d.mbH]
+	d.fInfoRow = d.fInfoRow[:d.mbW]
 
 	clear(d.intraT)
 	clear(d.mbCtx)
@@ -267,7 +267,7 @@ func (d *Decoder) decodeFrame() error {
 			}
 
 			if d.filterType > 0 {
-				d.fInfoRow[mbY*d.mbW+mbX] = d.mb.filterFlags()
+				d.fInfoRow[mbX] = d.mb.filterFlags()
 			}
 
 			d.reconstruct(mbX, mbY)
@@ -276,9 +276,12 @@ func (d *Decoder) decodeFrame() error {
 		if d.br.eof {
 			return ErrInvalid
 		}
+
+		if d.filterType > 0 {
+			d.filterRow(mbY)
+		}
 	}
 
-	d.filterFrame()
 	d.frames[d.newIdx].extend(d.mbW, d.mbH)
 
 	return nil

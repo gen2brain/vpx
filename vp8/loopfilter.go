@@ -1,5 +1,21 @@
 package vp8
 
+import (
+	"encoding/binary"
+	"math/bits"
+)
+
+const (
+	pairsEven   = 0x00ff00ff00ff00ff
+	pairsOne    = 0x0001000100010001
+	pairsBias   = 0x7f007f007f007f00
+	pairsThresh = 0x0800080008000800
+	pairsHigh   = 0x8000800080008000
+	pairsInner  = 0x0000800000008000
+	pairsHev    = 0x0000800080000000
+	pairsGather = 0x0100040010004000
+)
+
 type fInfo struct {
 	limit     int
 	ilevel    int
@@ -110,6 +126,181 @@ func needsFilter2(p []byte, off, step, t, it int) bool {
 		abs0(q3-q2) <= it && abs0(q2-q1) <= it && abs0(q1-q0) <= it
 }
 
+func gatherPairs(x uint64) uint32 {
+	return uint32((((x >> 15) & pairsOne) * pairsGather) >> 56)
+}
+
+type filterWords struct {
+	t     int
+	k     uint64
+	lim   uint64
+	hevLo uint64
+	hevHi uint64
+}
+
+func wordsFor(f fInfo) filterWords {
+	return filterWords{
+		t:     2*f.limit + 1,
+		k:     uint64(0x0100+f.ilevel) * pairsOne,
+		lim:   uint64(0x8100+2*f.ilevel) * pairsOne,
+		hevLo: uint64(0x7f00-f.ilevel+f.hevThresh) * pairsOne,
+		hevHi: uint64(0x8100+f.ilevel+f.hevThresh) * pairsOne,
+	}
+}
+
+func (l filterWords) needs(w uint64) (bool, bool) {
+	p1 := int(w >> 16 & 0xff)
+	p0 := int(w >> 24 & 0xff)
+	q0 := int(w >> 32 & 0xff)
+	q1 := int(w >> 40 & 0xff)
+
+	if 4*abs0(p0-q0)+abs0(p1-q1) > l.t {
+		return false, false
+	}
+
+	even := w & pairsEven
+	odd := (w >> 8) & pairsEven
+	next := (w >> 16) & pairsEven
+
+	a := (even + l.k) - odd
+	b := (odd + l.k) - next
+
+	lo := a + pairsBias
+
+	if (lo & (l.lim - a) & pairsHigh) != pairsHigh {
+		return false, false
+	}
+
+	if ((b + pairsBias) & (l.lim - b) & pairsInner) != pairsInner {
+		return false, false
+	}
+
+	return true, ((a + l.hevLo) & (l.hevHi - a) & pairsHev) != pairsHev
+}
+
+func filterMask(p []byte, off, stride, size int, f fInfo) (uint32, uint32) {
+	l := wordsFor(f)
+
+	lo := uint64(0x7800+l.t) * pairsOne
+	hi := uint64(0x8800+l.t) * pairsOne
+
+	var need, high uint32
+
+	for g := 0; g < size; g += 8 {
+		o := off + g
+
+		w0 := binary.LittleEndian.Uint64(p[o-4*stride:])
+		w1 := binary.LittleEndian.Uint64(p[o-3*stride:])
+		w2 := binary.LittleEndian.Uint64(p[o-2*stride:])
+		w3 := binary.LittleEndian.Uint64(p[o-stride:])
+		w4 := binary.LittleEndian.Uint64(p[o:])
+		w5 := binary.LittleEndian.Uint64(p[o+stride:])
+		w6 := binary.LittleEndian.Uint64(p[o+2*stride:])
+		w7 := binary.LittleEndian.Uint64(p[o+3*stride:])
+
+		for sh := range 2 {
+			p3 := (w0 >> (8 * sh)) & pairsEven
+			p2 := (w1 >> (8 * sh)) & pairsEven
+			p1 := (w2 >> (8 * sh)) & pairsEven
+			p0 := (w3 >> (8 * sh)) & pairsEven
+			q0 := (w4 >> (8 * sh)) & pairsEven
+			q1 := (w5 >> (8 * sh)) & pairsEven
+			q2 := (w6 >> (8 * sh)) & pairsEven
+			q3 := (w7 >> (8 * sh)) & pairsEven
+
+			s0 := (p0 << 2) + pairsThresh
+			s1 := q0 << 2
+
+			u := (s0 + p1) - (s1 + q1)
+			v := (s0 + q1) - (s1 + p1)
+
+			ok := ((u + lo) & (hi - u)) & ((v + lo) & (hi - v))
+
+			p10 := (p1 + l.k) - p0
+			q10 := (q1 + l.k) - q0
+
+			hev := ((p10 + l.hevLo) & (l.hevHi - p10)) & ((q10 + l.hevLo) & (l.hevHi - q10))
+
+			ok &= ((p10 + pairsBias) & (l.lim - p10)) & ((q10 + pairsBias) & (l.lim - q10))
+
+			p32 := (p3 + l.k) - p2
+			p21 := (p2 + l.k) - p1
+			q21 := (q2 + l.k) - q1
+			q32 := (q3 + l.k) - q2
+
+			ok &= ((p32 + pairsBias) & (l.lim - p32)) & ((p21 + pairsBias) & (l.lim - p21))
+			ok &= ((q21 + pairsBias) & (l.lim - q21)) & ((q32 + pairsBias) & (l.lim - q32))
+
+			need |= (gatherPairs(ok&pairsHigh) << sh) << g
+			high |= (gatherPairs((^hev)&pairsHigh) << sh) << g
+		}
+	}
+
+	return need, high
+}
+
+func vFilterLoop26(p []byte, off, stride, size int, f fInfo) {
+	m, h := filterMask(p, off, stride, size, f)
+
+	for m != 0 {
+		i := bits.TrailingZeros32(m)
+		m &= m - 1
+
+		if h>>i&1 != 0 {
+			doFilter2(p, off+i, stride)
+		} else {
+			doFilter6(p, off+i, stride)
+		}
+	}
+}
+
+func vFilterLoop24(p []byte, off, stride, size int, f fInfo) {
+	m, h := filterMask(p, off, stride, size, f)
+
+	for m != 0 {
+		i := bits.TrailingZeros32(m)
+		m &= m - 1
+
+		if h>>i&1 != 0 {
+			doFilter2(p, off+i, stride)
+		} else {
+			doFilter4(p, off+i, stride)
+		}
+	}
+}
+
+func hFilterLoop26(p []byte, off, stride, size int, f fInfo) {
+	l := wordsFor(f)
+
+	for range size {
+		if need, high := l.needs(binary.LittleEndian.Uint64(p[off-4:])); need {
+			if high {
+				doFilter2(p, off, 1)
+			} else {
+				doFilter6(p, off, 1)
+			}
+		}
+
+		off += stride
+	}
+}
+
+func hFilterLoop24(p []byte, off, stride, size int, f fInfo) {
+	l := wordsFor(f)
+
+	for range size {
+		if need, high := l.needs(binary.LittleEndian.Uint64(p[off-4:])); need {
+			if high {
+				doFilter2(p, off, 1)
+			} else {
+				doFilter4(p, off, 1)
+			}
+		}
+
+		off += stride
+	}
+}
+
 func simpleFilter16(p []byte, off, hstride, vstride, thresh int) {
 	t := 2*thresh + 1
 
@@ -144,38 +335,6 @@ func simpleHFilter16i(p []byte, off, stride, thresh int) {
 	}
 }
 
-func filterLoop26(p []byte, off, hstride, vstride, size int, f fInfo) {
-	t := 2*f.limit + 1
-
-	for range size {
-		if needsFilter2(p, off, hstride, t, f.ilevel) {
-			if hev(p, off, hstride, f.hevThresh) {
-				doFilter2(p, off, hstride)
-			} else {
-				doFilter6(p, off, hstride)
-			}
-		}
-
-		off += vstride
-	}
-}
-
-func filterLoop24(p []byte, off, hstride, vstride, size int, f fInfo) {
-	t := 2*f.limit + 1
-
-	for range size {
-		if needsFilter2(p, off, hstride, t, f.ilevel) {
-			if hev(p, off, hstride, f.hevThresh) {
-				doFilter2(p, off, hstride)
-			} else {
-				doFilter4(p, off, hstride)
-			}
-		}
-
-		off += vstride
-	}
-}
-
 func (f fInfo) edge() fInfo {
 	f.limit += 4
 
@@ -183,45 +342,45 @@ func (f fInfo) edge() fInfo {
 }
 
 func vFilter16(p []byte, off, stride int, f fInfo) {
-	filterLoop26(p, off, stride, 1, 16, f)
+	vFilterLoop26(p, off, stride, 16, f)
 }
 
 func hFilter16(p []byte, off, stride int, f fInfo) {
-	filterLoop26(p, off, 1, stride, 16, f)
+	hFilterLoop26(p, off, stride, 16, f)
 }
 
 func vFilter16i(p []byte, off, stride int, f fInfo) {
 	for range 3 {
 		off += 4 * stride
-		filterLoop24(p, off, stride, 1, 16, f)
+		vFilterLoop24(p, off, stride, 16, f)
 	}
 }
 
 func hFilter16i(p []byte, off, stride int, f fInfo) {
 	for range 3 {
 		off += 4
-		filterLoop24(p, off, 1, stride, 16, f)
+		hFilterLoop24(p, off, stride, 16, f)
 	}
 }
 
 func vFilter8(u, v []byte, off, stride int, f fInfo) {
-	filterLoop26(u, off, stride, 1, 8, f)
-	filterLoop26(v, off, stride, 1, 8, f)
+	vFilterLoop26(u, off, stride, 8, f)
+	vFilterLoop26(v, off, stride, 8, f)
 }
 
 func hFilter8(u, v []byte, off, stride int, f fInfo) {
-	filterLoop26(u, off, 1, stride, 8, f)
-	filterLoop26(v, off, 1, stride, 8, f)
+	hFilterLoop26(u, off, stride, 8, f)
+	hFilterLoop26(v, off, stride, 8, f)
 }
 
 func vFilter8i(u, v []byte, off, stride int, f fInfo) {
-	filterLoop24(u, off+4*stride, stride, 1, 8, f)
-	filterLoop24(v, off+4*stride, stride, 1, 8, f)
+	vFilterLoop24(u, off+4*stride, stride, 8, f)
+	vFilterLoop24(v, off+4*stride, stride, 8, f)
 }
 
 func hFilter8i(u, v []byte, off, stride int, f fInfo) {
-	filterLoop24(u, off+4, 1, stride, 8, f)
-	filterLoop24(v, off+4, 1, stride, 8, f)
+	hFilterLoop24(u, off+4, stride, 8, f)
+	hFilterLoop24(v, off+4, stride, 8, f)
 }
 
 func (d *Decoder) precomputeFilterStrengths() {
@@ -315,7 +474,7 @@ func (d *Decoder) setFilterInfo(info *fInfo, level int) {
 }
 
 func (d *Decoder) filterMB(mbX, mbY int) {
-	flags := d.fInfoRow[mbY*d.mbW+mbX]
+	flags := d.fInfoRow[mbX]
 
 	f := d.fStrengths[flags&3][flags>>4&3][flags>>2&3]
 	if f.limit == 0 {
@@ -371,14 +530,8 @@ func (d *Decoder) filterMB(mbX, mbY int) {
 	}
 }
 
-func (d *Decoder) filterFrame() {
-	if d.filterType == 0 {
-		return
-	}
-
-	for mbY := range d.mbH {
-		for mbX := range d.mbW {
-			d.filterMB(mbX, mbY)
-		}
+func (d *Decoder) filterRow(mbY int) {
+	for mbX := range d.mbW {
+		d.filterMB(mbX, mbY)
 	}
 }
