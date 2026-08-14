@@ -342,14 +342,32 @@ func (f fInfo) edge() fInfo {
 }
 
 func vFilter16(p []byte, off, stride int, f fInfo) {
+	if vFilter16Asm != nil && off >= 4*stride && len(p)-off >= 3*stride+16 {
+		vFilter16Asm(p, off, stride, f.limit, f.ilevel, f.hevThresh)
+
+		return
+	}
+
 	vFilterLoop26(p, off, stride, 16, f)
 }
 
 func hFilter16(p []byte, off, stride int, f fInfo) {
+	if hFilter16Asm != nil && off >= 4 && len(p)-off >= 15*stride+4 {
+		hFilter16Asm(p, off, stride, f.limit, f.ilevel, f.hevThresh)
+
+		return
+	}
+
 	hFilterLoop26(p, off, stride, 16, f)
 }
 
 func vFilter16i(p []byte, off, stride int, f fInfo) {
+	if vFilter16iAsm != nil && off >= 0 && len(p)-off >= 15*stride+16 {
+		vFilter16iAsm(p, off, stride, f.limit, f.ilevel, f.hevThresh)
+
+		return
+	}
+
 	for range 3 {
 		off += 4 * stride
 		vFilterLoop24(p, off, stride, 16, f)
@@ -357,6 +375,12 @@ func vFilter16i(p []byte, off, stride int, f fInfo) {
 }
 
 func hFilter16i(p []byte, off, stride int, f fInfo) {
+	if hFilter16iAsm != nil && off >= 0 && len(p)-off >= 15*stride+16 {
+		hFilter16iAsm(p, off, stride, f.limit, f.ilevel, f.hevThresh)
+
+		return
+	}
+
 	for range 3 {
 		off += 4
 		hFilterLoop24(p, off, stride, 16, f)
@@ -364,21 +388,45 @@ func hFilter16i(p []byte, off, stride int, f fInfo) {
 }
 
 func vFilter8(u, v []byte, off, stride int, f fInfo) {
+	if vFilter8Asm != nil && off >= 4*stride && len(u)-off >= 3*stride+8 && len(v)-off >= 3*stride+8 {
+		vFilter8Asm(u, v, off, stride, f.limit, f.ilevel, f.hevThresh)
+
+		return
+	}
+
 	vFilterLoop26(u, off, stride, 8, f)
 	vFilterLoop26(v, off, stride, 8, f)
 }
 
 func hFilter8(u, v []byte, off, stride int, f fInfo) {
+	if hFilter8Asm != nil && off >= 4 && len(u)-off >= 7*stride+4 && len(v)-off >= 7*stride+4 {
+		hFilter8Asm(u, v, off, stride, f.limit, f.ilevel, f.hevThresh)
+
+		return
+	}
+
 	hFilterLoop26(u, off, stride, 8, f)
 	hFilterLoop26(v, off, stride, 8, f)
 }
 
 func vFilter8i(u, v []byte, off, stride int, f fInfo) {
+	if vFilter8iAsm != nil && off >= 0 && len(u)-off >= 7*stride+8 && len(v)-off >= 7*stride+8 {
+		vFilter8iAsm(u, v, off, stride, f.limit, f.ilevel, f.hevThresh)
+
+		return
+	}
+
 	vFilterLoop24(u, off+4*stride, stride, 8, f)
 	vFilterLoop24(v, off+4*stride, stride, 8, f)
 }
 
 func hFilter8i(u, v []byte, off, stride int, f fInfo) {
+	if hFilter8iAsm != nil && off >= 0 && len(u)-off >= 7*stride+8 && len(v)-off >= 7*stride+8 {
+		hFilter8iAsm(u, v, off, stride, f.limit, f.ilevel, f.hevThresh)
+
+		return
+	}
+
 	hFilterLoop24(u, off+4, stride, 8, f)
 	hFilterLoop24(v, off+4, stride, 8, f)
 }
