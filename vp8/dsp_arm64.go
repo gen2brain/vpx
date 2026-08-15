@@ -26,6 +26,12 @@ func hFilter8NEON(u, v *byte, stride, limit, ilevel, hevThresh int)
 //go:noescape
 func hFilter8iNEON(u, v *byte, stride, limit, ilevel, hevThresh int)
 
+//go:noescape
+func transformNEON(in *int16, dst *byte, two int)
+
+//go:noescape
+func transformDCNEON(in *int16, dst *byte)
+
 func dspInit() {
 	vFilter16Asm = func(p []byte, off, stride, limit, ilevel, hevThresh int) {
 		vFilter16NEON(&p[off], stride, limit, ilevel, hevThresh)
@@ -57,5 +63,13 @@ func dspInit() {
 
 	hFilter8iAsm = func(u, v []byte, off, stride, limit, ilevel, hevThresh int) {
 		hFilter8iNEON(&u[off], &v[off], stride, limit, ilevel, hevThresh)
+	}
+
+	transformAsm = func(in []int16, b []byte, off, two int) {
+		transformNEON(&in[0], &b[off], two)
+	}
+
+	transformDCAsm = func(in []int16, b []byte, off int) {
+		transformDCNEON(&in[0], &b[off])
 	}
 }

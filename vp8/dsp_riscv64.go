@@ -5,6 +5,12 @@ package vp8
 //go:noescape
 func filterRVV(p *byte, tap, walk, n, limit, ilevel, hevThresh, six int)
 
+//go:noescape
+func transformRVV(in *int16, dst *byte)
+
+//go:noescape
+func transformDCRVV(in *int16, dst *byte)
+
 func dspInit() {
 	vFilter16Asm = func(p []byte, off, stride, limit, ilevel, hevThresh int) {
 		filterRVV(&p[off], stride, 1, 16, limit, ilevel, hevThresh, 1)
@@ -46,5 +52,17 @@ func dspInit() {
 	hFilter8iAsm = func(u, v []byte, off, stride, limit, ilevel, hevThresh int) {
 		filterRVV(&u[off+4], 1, stride, 8, limit, ilevel, hevThresh, 0)
 		filterRVV(&v[off+4], 1, stride, 8, limit, ilevel, hevThresh, 0)
+	}
+
+	transformAsm = func(in []int16, b []byte, off, two int) {
+		transformRVV(&in[0], &b[off])
+
+		if two != 0 {
+			transformRVV(&in[16], &b[off+4])
+		}
+	}
+
+	transformDCAsm = func(in []int16, b []byte, off int) {
+		transformDCRVV(&in[0], &b[off])
 	}
 }

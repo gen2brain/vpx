@@ -26,6 +26,12 @@ func hFilter8SSE(u, v *byte, stride, limit, ilevel, hevThresh int)
 //go:noescape
 func hFilter8iSSE(u, v *byte, stride, limit, ilevel, hevThresh int)
 
+//go:noescape
+func transformSSE(in *int16, dst *byte, two int)
+
+//go:noescape
+func transformDCSSE(in *int16, dst *byte)
+
 func dspInit() {
 	vFilter16Asm = func(p []byte, off, stride, limit, ilevel, hevThresh int) {
 		vFilter16SSE(&p[off], stride, limit, ilevel, hevThresh)
@@ -57,5 +63,13 @@ func dspInit() {
 
 	hFilter8iAsm = func(u, v []byte, off, stride, limit, ilevel, hevThresh int) {
 		hFilter8iSSE(&u[off], &v[off], stride, limit, ilevel, hevThresh)
+	}
+
+	transformAsm = func(in []int16, b []byte, off, two int) {
+		transformSSE(&in[0], &b[off], two)
+	}
+
+	transformDCAsm = func(in []int16, b []byte, off int) {
+		transformDCSSE(&in[0], &b[off])
 	}
 }

@@ -3,13 +3,15 @@ package vp8
 const bps = 32
 
 const (
-	idctC1 = 20091
-	idctC2 = 35468
+	idctK1 = 20091
+	idctK2 = -30068
 )
 
-func mul1(a int) int { return a*idctC1>>16 + a }
+func mulhi(a, k int16) int16 { return int16(int32(a) * int32(k) >> 16) }
 
-func mul2(a int) int { return a * idctC2 >> 16 }
+func mul1(a int16) int16 { return mulhi(a, idctK1) + a }
+
+func mul2(a int16) int16 { return mulhi(a, idctK2) + a }
 
 func clip8(v int) uint8 {
 	if v&^0xff == 0 {
@@ -23,12 +25,12 @@ func clip8(v int) uint8 {
 	return 255
 }
 
-func store(b []byte, off, x, y, v int) {
+func store(b []byte, off, x, y int, v int16) {
 	p := off + x + y*bps
-	b[p] = clip8(int(b[p]) + v>>3)
+	b[p] = clip8(int(b[p]) + int(v>>3))
 }
 
-func store2(b []byte, off, y, dc, d, c int) {
+func store2(b []byte, off, y int, dc, d, c int16) {
 	store(b, off, 0, y, dc+d)
 	store(b, off, 1, y, dc+c)
 	store(b, off, 2, y, dc-c)
@@ -36,13 +38,23 @@ func store2(b []byte, off, y, dc, d, c int) {
 }
 
 func transformOne(in []int16, b []byte, off int) {
-	var c [16]int
+	if transformAsm != nil && off >= 0 && len(b)-off >= 3*bps+4 && len(in) >= 16 {
+		transformAsm(in, b, off, 0)
+
+		return
+	}
+
+	transformOneScalar(in, b, off)
+}
+
+func transformOneScalar(in []int16, b []byte, off int) {
+	var c [16]int16
 
 	for i := range 4 {
-		a := int(in[i]) + int(in[8+i])
-		d := int(in[i]) - int(in[8+i])
-		e := mul2(int(in[4+i])) - mul1(int(in[12+i]))
-		f := mul1(int(in[4+i])) + mul2(int(in[12+i]))
+		a := in[i] + in[8+i]
+		d := in[i] - in[8+i]
+		e := mul2(in[4+i]) - mul1(in[12+i])
+		f := mul1(in[4+i]) + mul2(in[12+i])
 
 		c[4*i] = a + f
 		c[4*i+1] = d + e
@@ -65,11 +77,11 @@ func transformOne(in []int16, b []byte, off int) {
 }
 
 func transformAC3(in []int16, b []byte, off int) {
-	a := int(in[0]) + 4
-	c4 := mul2(int(in[4]))
-	d4 := mul1(int(in[4]))
-	c1 := mul2(int(in[1]))
-	d1 := mul1(int(in[1]))
+	a := in[0] + 4
+	c4 := mul2(in[4])
+	d4 := mul1(in[4])
+	c1 := mul2(in[1])
+	d1 := mul1(in[1])
 
 	store2(b, off, 0, a+d4, d1, c1)
 	store2(b, off, 1, a+c4, d1, c1)
@@ -78,7 +90,17 @@ func transformAC3(in []int16, b []byte, off int) {
 }
 
 func transformDC(in []int16, b []byte, off int) {
-	dc := int(in[0]) + 4
+	if transformDCAsm != nil && off >= 0 && len(b)-off >= 3*bps+4 {
+		transformDCAsm(in, b, off)
+
+		return
+	}
+
+	transformDCScalar(in, b, off)
+}
+
+func transformDCScalar(in []int16, b []byte, off int) {
+	dc := in[0] + 4
 
 	for y := range 4 {
 		for x := range 4 {
@@ -88,6 +110,12 @@ func transformDC(in []int16, b []byte, off int) {
 }
 
 func transform(in []int16, b []byte, off int, two bool) {
+	if two && transformAsm != nil && off >= 0 && len(b)-off >= 3*bps+8 && len(in) >= 32 {
+		transformAsm(in, b, off, 1)
+
+		return
+	}
+
 	transformOne(in, b, off)
 
 	if two {

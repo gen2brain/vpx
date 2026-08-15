@@ -10,6 +10,9 @@ var (
 	hFilter16iAsm func(p []byte, off, stride, limit, ilevel, hevThresh int)
 	hFilter8Asm   func(u, v []byte, off, stride, limit, ilevel, hevThresh int)
 	hFilter8iAsm  func(u, v []byte, off, stride, limit, ilevel, hevThresh int)
+
+	transformAsm   func(in []int16, b []byte, off, two int)
+	transformDCAsm func(in []int16, b []byte, off int)
 )
 
 func init() {

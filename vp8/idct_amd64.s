@@ -1,0 +1,232 @@
+//go:build amd64 && !noasm
+
+#include "textflag.h"
+
+DATA kfour<>+0(SB)/8, $0x0004000400040004
+DATA kfour<>+8(SB)/8, $0x0004000400040004
+GLOBL kfour<>(SB), RODATA|NOPTR, $16
+
+DATA kk1<>+0(SB)/8, $0x4e7b4e7b4e7b4e7b
+DATA kk1<>+8(SB)/8, $0x4e7b4e7b4e7b4e7b
+GLOBL kk1<>(SB), RODATA|NOPTR, $16
+
+DATA kk2<>+0(SB)/8, $0x8a8c8a8c8a8c8a8c
+DATA kk2<>+8(SB)/8, $0x8a8c8a8c8a8c8a8c
+GLOBL kk2<>(SB), RODATA|NOPTR, $16
+
+#define TRANSPOSE \
+	MOVOU     X0, X4      \
+	PUNPCKLWL X1, X4      \
+	MOVOU     X2, X5      \
+	PUNPCKLWL X3, X5      \
+	MOVOU     X0, X6      \
+	PUNPCKHWL X1, X6      \
+	MOVOU     X2, X7      \
+	PUNPCKHWL X3, X7      \
+	MOVOU     X4, X8      \
+	PUNPCKLLQ X5, X8      \
+	MOVOU     X6, X9      \
+	PUNPCKLLQ X7, X9      \
+	MOVOU     X4, X10     \
+	PUNPCKHLQ X5, X10     \
+	MOVOU     X6, X11     \
+	PUNPCKHLQ X7, X11     \
+	MOVOU     X8, X0      \
+	PUNPCKLQDQ X9, X0     \
+	MOVOU     X8, X1      \
+	PUNPCKHQDQ X9, X1     \
+	MOVOU     X10, X2     \
+	PUNPCKLQDQ X11, X2    \
+	MOVOU     X10, X3     \
+	PUNPCKHQDQ X11, X3
+
+#define PASS \
+	MOVOU X0, X4   \
+	MOVOU X4, X5   \
+	PADDW X2, X4   \
+	PSUBW X2, X5   \
+	MOVOU X1, X6   \
+	PMULHW X13, X6 \
+	MOVOU X3, X7   \
+	PMULHW X12, X7 \
+	PSUBW X7, X6   \
+	MOVOU X1, X7   \
+	PSUBW X3, X7   \
+	PADDW X7, X6   \
+	MOVOU X1, X8   \
+	PMULHW X12, X8 \
+	MOVOU X3, X9   \
+	PMULHW X13, X9 \
+	PADDW X9, X8   \
+	MOVOU X1, X9   \
+	PADDW X3, X9   \
+	PADDW X9, X8   \
+	MOVOU X4, X10  \
+	PADDW X8, X10  \
+	MOVOU X5, X11  \
+	PADDW X6, X11  \
+	PSUBW X6, X5   \
+	PSUBW X8, X4   \
+	MOVOU X10, X0  \
+	MOVOU X11, X1  \
+	MOVOU X5, X2   \
+	MOVOU X4, X3
+
+#define ADDROW(t, dst) \
+	MOVOU     t, X4   \
+	PUNPCKLBW X15, X4 \
+	PADDW     dst, X4 \
+	PACKUSWB  X4, X4
+
+// func transformSSE(in *int16, dst *byte, two int)
+TEXT ·transformSSE(SB), NOSPLIT, $0-24
+	MOVQ in+0(FP), SI
+	MOVQ dst+8(FP), DI
+	MOVQ two+16(FP), CX
+
+	MOVQ (SI), X0
+	MOVQ 8(SI), X1
+	MOVQ 16(SI), X2
+	MOVQ 24(SI), X3
+
+	TESTQ CX, CX
+	JZ    one
+
+	MOVQ  32(SI), X4
+	PUNPCKLQDQ X4, X0
+	MOVQ  40(SI), X4
+	PUNPCKLQDQ X4, X1
+	MOVQ  48(SI), X4
+	PUNPCKLQDQ X4, X2
+	MOVQ  56(SI), X4
+	PUNPCKLQDQ X4, X3
+
+one:
+	MOVOU kk1<>(SB), X12
+	MOVOU kk2<>(SB), X13
+
+	PASS
+	TRANSPOSE
+
+	PADDW kfour<>(SB), X0
+
+	PASS
+
+	PSRAW $3, X0
+	PSRAW $3, X1
+	PSRAW $3, X2
+	PSRAW $3, X3
+
+	TRANSPOSE
+
+	PXOR X15, X15
+
+	TESTQ CX, CX
+	JZ    storeone
+
+	MOVQ  (DI), X4
+	PUNPCKLBW X15, X4
+	PADDW X0, X4
+	PACKUSWB X4, X4
+	MOVQ  X4, (DI)
+
+	MOVQ  32(DI), X4
+	PUNPCKLBW X15, X4
+	PADDW X1, X4
+	PACKUSWB X4, X4
+	MOVQ  X4, 32(DI)
+
+	MOVQ  64(DI), X4
+	PUNPCKLBW X15, X4
+	PADDW X2, X4
+	PACKUSWB X4, X4
+	MOVQ  X4, 64(DI)
+
+	MOVQ  96(DI), X4
+	PUNPCKLBW X15, X4
+	PADDW X3, X4
+	PACKUSWB X4, X4
+	MOVQ  X4, 96(DI)
+	RET
+
+storeone:
+	MOVL  (DI), X4
+	PUNPCKLBW X15, X4
+	PADDW X0, X4
+	PACKUSWB X4, X4
+	MOVL  X4, (DI)
+
+	MOVL  32(DI), X4
+	PUNPCKLBW X15, X4
+	PADDW X1, X4
+	PACKUSWB X4, X4
+	MOVL  X4, 32(DI)
+
+	MOVL  64(DI), X4
+	PUNPCKLBW X15, X4
+	PADDW X2, X4
+	PACKUSWB X4, X4
+	MOVL  X4, 64(DI)
+
+	MOVL  96(DI), X4
+	PUNPCKLBW X15, X4
+	PADDW X3, X4
+	PACKUSWB X4, X4
+	MOVL  X4, 96(DI)
+	RET
+
+// func transformDCSSE(in *int16, dst *byte)
+TEXT ·transformDCSSE(SB), NOSPLIT, $0-16
+	MOVQ in+0(FP), SI
+	MOVQ dst+8(FP), DI
+
+	MOVWQSX (SI), AX
+	ADDQ  $4, AX
+	MOVWQSX AX, AX
+	SARQ  $3, AX
+
+	MOVQ  AX, DX
+	NEGQ  DX
+	TESTQ AX, AX
+	CMOVQLT DX, AX
+	CMPQ  AX, $255
+	JLE   small
+	MOVQ  $255, AX
+
+small:
+	MOVQ  AX, X0
+	PUNPCKLBW X0, X0
+	PUNPCKLWL X0, X0
+	PSHUFD $0, X0, X0
+
+	TESTQ DX, DX
+	JGE   negative
+
+	MOVL  (DI), X1
+	PADDUSB X0, X1
+	MOVL  X1, (DI)
+	MOVL  32(DI), X1
+	PADDUSB X0, X1
+	MOVL  X1, 32(DI)
+	MOVL  64(DI), X1
+	PADDUSB X0, X1
+	MOVL  X1, 64(DI)
+	MOVL  96(DI), X1
+	PADDUSB X0, X1
+	MOVL  X1, 96(DI)
+	RET
+
+negative:
+	MOVL  (DI), X1
+	PSUBUSB X0, X1
+	MOVL  X1, (DI)
+	MOVL  32(DI), X1
+	PSUBUSB X0, X1
+	MOVL  X1, 32(DI)
+	MOVL  64(DI), X1
+	PSUBUSB X0, X1
+	MOVL  X1, 64(DI)
+	MOVL  96(DI), X1
+	PSUBUSB X0, X1
+	MOVL  X1, 96(DI)
+	RET
