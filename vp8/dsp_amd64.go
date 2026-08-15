@@ -231,7 +231,7 @@ func dspInit() {
 	}
 
 	sixtapVAsm = func(dst []byte, dOff, dStride int, src []byte, sOff, sStride, w, h int, f *[6]int16) {
-		if sOff < 2*sStride || len(src)-sOff < (h+2)*sStride+w+8 || len(dst)-dOff < (h-1)*dStride+w {
+		if sOff < 2*sStride || len(src)-sOff < (h+2)*sStride+16 || len(dst)-dOff < (h-1)*dStride+w {
 			sixtapVGo(dst, dOff, dStride, src, sOff, sStride, w, h, f)
 
 			return
