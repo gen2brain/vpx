@@ -344,3 +344,247 @@ func paletteDeltas(palette, out []uint32) []uint32 {
 
 	return out
 }
+
+func crossColorBias(counts []uint32) float64 {
+	bits := 3 * float64(counts[0])
+	decay := 1.44
+
+	for i := 1; i < 16; i++ {
+		bits += decay * float64(counts[i]+counts[256-i])
+		decay = decay * 6 / 10
+	}
+
+	return -bits / 10
+}
+
+func colorDeltaForward(m, c int8) int32 {
+	return int32(m) * int32(c) >> 5
+}
+
+func transformColorForward(code, argb uint32) uint32 {
+	green := int8(argb >> 8)
+	red := argb >> 16 & 0xff
+
+	nr := int32(red) - colorDeltaForward(int8(code), green)
+	nb := int32(argb&0xff) - colorDeltaForward(int8(code>>8), green) - colorDeltaForward(int8(code>>16), int8(red))
+
+	return argb&0xff00ff00 | uint32(uint8(nr))<<16 | uint32(uint8(nb))
+}
+
+type crossSearch struct {
+	px           []uint32
+	stride       int
+	tw, th       int
+	histo        [256]uint32
+	accRed       [256]uint32
+	accBlue      [256]uint32
+	prevX, prevY uint32
+}
+
+func (s *crossSearch) redCost(g2r int) float64 {
+	clear(s.histo[:])
+
+	for y := range s.th {
+		row := s.px[y*s.stride:]
+
+		for _, argb := range row[:s.tw] {
+			s.histo[uint8(int32(argb>>16&0xff)-colorDeltaForward(int8(g2r), int8(argb>>8)))]++
+		}
+	}
+
+	cost := combinedEntropy(s.histo[:], s.accRed[:]) + crossColorBias(s.histo[:])
+
+	if uint8(g2r) == uint8(s.prevX) {
+		cost -= 3
+	}
+
+	if uint8(g2r) == uint8(s.prevY) {
+		cost -= 3
+	}
+
+	if uint8(g2r) == 0 {
+		cost -= 3
+	}
+
+	return cost
+}
+
+func (s *crossSearch) blueCost(g2b, r2b int) float64 {
+	clear(s.histo[:])
+
+	for y := range s.th {
+		row := s.px[y*s.stride:]
+
+		for _, argb := range row[:s.tw] {
+			v := int32(argb&0xff) - colorDeltaForward(int8(g2b), int8(argb>>8)) - colorDeltaForward(int8(r2b), int8(argb>>16))
+			s.histo[uint8(v)]++
+		}
+	}
+
+	cost := combinedEntropy(s.histo[:], s.accBlue[:]) + crossColorBias(s.histo[:])
+
+	if uint8(g2b) == uint8(s.prevX>>8) {
+		cost -= 3
+	}
+
+	if uint8(g2b) == uint8(s.prevY>>8) {
+		cost -= 3
+	}
+
+	if uint8(r2b) == uint8(s.prevX>>16) {
+		cost -= 3
+	}
+
+	if uint8(r2b) == uint8(s.prevY>>16) {
+		cost -= 3
+	}
+
+	if uint8(g2b) == 0 {
+		cost -= 3
+	}
+
+	if uint8(r2b) == 0 {
+		cost -= 3
+	}
+
+	return cost
+}
+
+var crossAxes = [8][2]int{{0, -1}, {0, 1}, {-1, 0}, {1, 0}, {-1, -1}, {-1, 1}, {1, -1}, {1, 1}}
+
+var crossDeltas = [7]int{16, 16, 8, 4, 2, 2, 2}
+
+func (s *crossSearch) best() uint32 {
+	g2r := 0
+	cost := s.redCost(g2r)
+
+	for iter := range 6 {
+		delta := 32 >> iter
+
+		for _, off := range [2]int{-delta, delta} {
+			if c := s.redCost(g2r + off); c < cost {
+				cost, g2r = c, g2r+off
+			}
+		}
+	}
+
+	g2b, r2b := 0, 0
+	cost = s.blueCost(g2b, r2b)
+
+	for _, delta := range crossDeltas {
+		for _, axis := range crossAxes {
+			cg, cr := g2b+axis[0]*delta, r2b+axis[1]*delta
+
+			if c := s.blueCost(cg, cr); c < cost {
+				cost, g2b, r2b = c, cg, cr
+			}
+		}
+
+		if delta == 2 && g2b == 0 && r2b == 0 {
+			break
+		}
+	}
+
+	return argbBlack | uint32(uint8(r2b))<<16 | uint32(uint8(g2b))<<8 | uint32(uint8(g2r))
+}
+
+func crossColorImage(px []uint32, width, height, bits int, codes []uint32) float64 {
+	var red, blue [256]uint32
+
+	redBlueHistograms(px, width, &red, &blue)
+
+	before := entropy(red[:]) + entropy(blue[:])
+
+	tilesPerRow := subSampleSize(width, bits)
+
+	var s crossSearch
+
+	for ty := range subSampleSize(height, bits) {
+		for tx := range tilesPerRow {
+			x0, y0 := tx<<bits, ty<<bits
+			x1, y1 := min(x0+1<<bits, width), min(y0+1<<bits, height)
+
+			s.px = px[y0*width+x0:]
+			s.stride = width
+			s.tw, s.th = x1-x0, y1-y0
+
+			s.prevX, s.prevY = argbBlack, argbBlack
+
+			if tx > 0 {
+				s.prevX = codes[ty*tilesPerRow+tx-1]
+			}
+
+			if ty > 0 {
+				s.prevY = codes[(ty-1)*tilesPerRow+tx]
+			}
+
+			code := s.best()
+			codes[ty*tilesPerRow+tx] = code
+
+			for y := y0; y < y1; y++ {
+				row := px[y*width : y*width+x1]
+
+				for x := x0; x < x1; x++ {
+					row[x] = transformColorForward(code, row[x])
+				}
+			}
+
+			for y := y0; y < y1; y++ {
+				for x := x0; x < x1; x++ {
+					i := y*width + x
+
+					if x >= 2 && px[i] == px[i-2] && px[i] == px[i-1] {
+						continue
+					}
+
+					if i >= width+2 && px[i-2] == px[i-width-2] && px[i-1] == px[i-width-1] && px[i] == px[i-width] {
+						continue
+					}
+
+					s.accRed[px[i]>>16&0xff]++
+					s.accBlue[px[i]&0xff]++
+				}
+			}
+		}
+	}
+
+	return before - entropy(s.accRed[:]) - entropy(s.accBlue[:])
+}
+
+func redBlueHistograms(px []uint32, width int, red, blue *[256]uint32) {
+	for i, v := range px {
+		if i >= 2 && v == px[i-2] && v == px[i-1] {
+			continue
+		}
+
+		if i >= width+2 && px[i-2] == px[i-width-2] && px[i-1] == px[i-width-1] && v == px[i-width] {
+			continue
+		}
+
+		red[v>>16&0xff]++
+		blue[v&0xff]++
+	}
+}
+
+func undoCrossColor(px []uint32, width, height, bits int, codes []uint32) {
+	tilesPerRow := subSampleSize(width, bits)
+
+	for y := range height {
+		row := px[y*width : y*width+width]
+		codes := codes[(y>>bits)*tilesPerRow:]
+
+		for x := range width {
+			row[x] = transformColorInverse(codes[x>>bits], row[x])
+		}
+	}
+}
+
+func redBlueAlwaysZero(px []uint32) bool {
+	for _, v := range px {
+		if v&0x00ff00ff != 0 {
+			return false
+		}
+	}
+
+	return true
+}

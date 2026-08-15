@@ -79,42 +79,44 @@ func itoa(n int) string {
 
 func TestEncodeLosslessRoundTrip(t *testing.T) {
 	for name, img := range testImages() {
-		t.Run(name, func(t *testing.T) {
-			var buf bytes.Buffer
+		for _, method := range []int{0, 4, 6} {
+			t.Run(fmt.Sprintf("%s/m%d", name, method), func(t *testing.T) {
+				var buf bytes.Buffer
 
-			if err := Encode(&buf, img, Options{Lossless: true}); err != nil {
-				t.Fatalf("encode: %v", err)
-			}
+				if err := Encode(&buf, img, Options{Lossless: true, Method: method}); err != nil {
+					t.Fatalf("encode: %v", err)
+				}
 
-			got, err := Decode(&buf)
-			if err != nil {
-				t.Fatalf("decode: %v", err)
-			}
+				got, err := Decode(&buf)
+				if err != nil {
+					t.Fatalf("decode: %v", err)
+				}
 
-			nrgba, ok := got.(*image.NRGBA)
-			if !ok {
-				t.Fatalf("decoded %T, want *image.NRGBA", got)
-			}
+				nrgba, ok := got.(*image.NRGBA)
+				if !ok {
+					t.Fatalf("decoded %T, want *image.NRGBA", got)
+				}
 
-			if !nrgba.Bounds().Eq(img.Bounds()) {
-				t.Fatalf("bounds %v, want %v", nrgba.Bounds(), img.Bounds())
-			}
+				if !nrgba.Bounds().Eq(img.Bounds()) {
+					t.Fatalf("bounds %v, want %v", nrgba.Bounds(), img.Bounds())
+				}
 
-			for y := range img.Bounds().Dy() {
-				for x := range img.Bounds().Dx() {
-					o := img.PixOffset(x, y)
+				for y := range img.Bounds().Dy() {
+					for x := range img.Bounds().Dx() {
+						o := img.PixOffset(x, y)
 
-					want := img.Pix[o : o+4]
-					if want[3] == 0 {
-						continue
-					}
+						want := img.Pix[o : o+4]
+						if want[3] == 0 {
+							continue
+						}
 
-					if have := nrgba.Pix[nrgba.PixOffset(x, y):][:4]; !bytes.Equal(have, want) {
-						t.Fatalf("pixel %d,%d: %v, want %v", x, y, have, want)
+						if have := nrgba.Pix[nrgba.PixOffset(x, y):][:4]; !bytes.Equal(have, want) {
+							t.Fatalf("pixel %d,%d: %v, want %v", x, y, have, want)
+						}
 					}
 				}
-			}
-		})
+			})
+		}
 	}
 }
 
@@ -124,58 +126,60 @@ func TestEncodeLosslessAgainstDwebp(t *testing.T) {
 	dir := t.TempDir()
 
 	for _, name := range []string{"simple", "palette", "2-color", "lossless_alpha"} {
-		t.Run(name, func(t *testing.T) {
-			path := filepath.Join("testdata", name+".webp")
+		for _, method := range []int{0, 4, 6} {
+			t.Run(fmt.Sprintf("%s/m%d", name, method), func(t *testing.T) {
+				path := filepath.Join("testdata", name+".webp")
 
-			f, err := os.Open(path)
-			if err != nil {
-				t.Fatal(err)
-			}
+				f, err := os.Open(path)
+				if err != nil {
+					t.Fatal(err)
+				}
 
-			defer f.Close()
+				defer f.Close()
 
-			img, err := Decode(f)
-			if err != nil {
-				t.Fatalf("decode: %v", err)
-			}
+				img, err := Decode(f)
+				if err != nil {
+					t.Fatalf("decode: %v", err)
+				}
 
-			var buf bytes.Buffer
+				var buf bytes.Buffer
 
-			if err := Encode(&buf, img, Options{Lossless: true, Exact: true}); err != nil {
-				t.Fatalf("encode: %v", err)
-			}
+				if err := Encode(&buf, img, Options{Lossless: true, Exact: true, Method: method}); err != nil {
+					t.Fatalf("encode: %v", err)
+				}
 
-			enc := filepath.Join(dir, name+".enc.webp")
+				enc := filepath.Join(dir, name+".enc.webp")
 
-			if err := os.WriteFile(enc, buf.Bytes(), 0o600); err != nil {
-				t.Fatal(err)
-			}
+				if err := os.WriteFile(enc, buf.Bytes(), 0o600); err != nil {
+					t.Fatal(err)
+				}
 
-			want, w, h, err := dwebpPAM(bin, path, filepath.Join(dir, "want.pam"))
-			if err != nil {
-				t.Fatalf("dwebp on the source: %v", err)
-			}
+				want, w, h, err := dwebpPAM(bin, path, filepath.Join(dir, "want.pam"))
+				if err != nil {
+					t.Fatalf("dwebp on the source: %v", err)
+				}
 
-			got, gw, gh, err := dwebpPAM(bin, enc, filepath.Join(dir, "got.pam"))
-			if err != nil {
-				t.Fatalf("dwebp on our output: %v", err)
-			}
+				got, gw, gh, err := dwebpPAM(bin, enc, filepath.Join(dir, "got.pam"))
+				if err != nil {
+					t.Fatalf("dwebp on our output: %v", err)
+				}
 
-			if gw != w || gh != h {
-				t.Fatalf("libwebp read %dx%d, want %dx%d", gw, gh, w, h)
-			}
+				if gw != w || gh != h {
+					t.Fatalf("libwebp read %dx%d, want %dx%d", gw, gh, w, h)
+				}
 
-			if diff := comparePixels(got, want, w, h); diff != "" {
-				t.Fatal(diff)
-			}
+				if diff := comparePixels(got, want, w, h); diff != "" {
+					t.Fatal(diff)
+				}
 
-			src, err := os.Stat(path)
-			if err != nil {
-				t.Fatal(err)
-			}
+				src, err := os.Stat(path)
+				if err != nil {
+					t.Fatal(err)
+				}
 
-			t.Logf("%dx%d: %d bytes, cwebp wrote %d", w, h, buf.Len(), src.Size())
-		})
+				t.Logf("%dx%d: %d bytes, cwebp wrote %d", w, h, buf.Len(), src.Size())
+			})
+		}
 	}
 }
 

@@ -45,6 +45,26 @@ func (w *lbitWriter) count(m writerMark) int {
 	return 8*(len(w.buf)-m.n) + int(w.n) - int(m.k)
 }
 
+type writerSnapshot struct {
+	buf  []byte
+	bits uint64
+	n    uint
+}
+
+func (w *lbitWriter) snapshot(m writerMark, scratch []byte) writerSnapshot {
+	return writerSnapshot{buf: append(scratch[:0], w.buf[m.n:]...), bits: w.bits, n: w.n}
+}
+
+func (w *lbitWriter) splice(m writerMark, s writerSnapshot) {
+	w.buf = append(w.buf[:m.n], s.buf...)
+	w.bits = s.bits
+	w.n = s.n
+}
+
+func (s writerSnapshot) count(m writerMark) int {
+	return 8*len(s.buf) + int(s.n) - int(m.k)
+}
+
 func (w *lbitWriter) flush() []byte {
 	for w.n > 0 {
 		w.buf = append(w.buf, byte(w.bits))

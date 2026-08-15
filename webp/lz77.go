@@ -1,5 +1,10 @@
 package webp
 
+import (
+	"math"
+	"slices"
+)
+
 const (
 	hashBits       = 18
 	hashSize       = 1 << hashBits
@@ -379,4 +384,166 @@ func backwardRefsLz77(argb []uint32, chain *hashChain, refs []ref) []ref {
 	}
 
 	return refs
+}
+
+type costModel struct {
+	literal []float64
+	red     [numLiteralCodes]float64
+	blue    [numLiteralCodes]float64
+	alpha   [numLiteralCodes]float64
+	dist    [numDistanceCodes]float64
+}
+
+func bitEstimates(counts []uint32, out []float64) {
+	sum, nonzero := uint32(0), 0
+
+	for _, c := range counts {
+		sum += c
+
+		if c > 0 {
+			nonzero++
+		}
+	}
+
+	if nonzero <= 1 {
+		clear(out)
+
+		return
+	}
+
+	total := math.Log2(float64(sum))
+
+	for i, c := range counts {
+		if c == 0 {
+			out[i] = total
+
+			continue
+		}
+
+		out[i] = total - math.Log2(float64(c))
+	}
+}
+
+func (m *costModel) build(h *histogram, cacheBits uint) {
+	n := numLiteralCodes + numLengthCodes
+
+	if cacheBits > 0 {
+		n += 1 << cacheBits
+	}
+
+	if cap(m.literal) < n {
+		m.literal = make([]float64, n)
+	}
+
+	m.literal = m.literal[:n]
+
+	bitEstimates(h.literal, m.literal)
+	bitEstimates(h.red[:], m.red[:])
+	bitEstimates(h.blue[:], m.blue[:])
+	bitEstimates(h.alpha[:], m.alpha[:])
+	bitEstimates(h.dist[:], m.dist[:])
+}
+
+func (m *costModel) literalCost(v uint32) float64 {
+	return m.alpha[v>>24] + m.red[v>>16&0xff] + m.literal[v>>8&0xff] + m.blue[v&0xff]
+}
+
+func (m *costModel) cacheCost(key uint32) float64 {
+	return m.literal[numLiteralCodes+numLengthCodes+int(key)]
+}
+
+func (m *costModel) lengthCost(l int) float64 {
+	code, n, _ := prefixEncode(l)
+
+	return m.literal[numLiteralCodes+code] + float64(n)
+}
+
+func (m *costModel) distanceCost(planeCode int) float64 {
+	code, n, _ := prefixEncode(planeCode)
+
+	return m.dist[code] + float64(n)
+}
+
+const costFudge = 68065.0 / 65536
+
+func backwardRefsCost(argb []uint32, xsize int, chain *hashChain, cacheBits uint,
+	m *costModel, cache *colorCache, cost []float64, dist []uint16, path []int, refs []ref,
+) ([]ref, []int) {
+	n := len(argb)
+
+	for i := range cost[:n] {
+		cost[i] = math.Inf(1)
+	}
+
+	useCache := cacheBits > 0
+	if useCache {
+		cache.init(cacheBits)
+	}
+
+	literal := func(i int, prev float64) {
+		v := argb[i]
+		c := prev
+
+		if key := cache.index(v); useCache && cache.data[key] == v {
+			c += m.cacheCost(key) * costFudge
+		} else {
+			if useCache {
+				cache.insert(v)
+			}
+
+			c += m.literalCost(v) * costFudge
+		}
+
+		if c < cost[i] {
+			cost[i] = c
+			dist[i] = 1
+		}
+	}
+
+	literal(0, 0)
+
+	for i := 1; i < n; i++ {
+		prev := cost[i-1]
+
+		literal(i, prev)
+
+		length := chain.findLength(i)
+		if length < minLength {
+			continue
+		}
+
+		base := prev + m.distanceCost(distanceToPlaneCode(xsize, chain.findOffset(i)))
+
+		for k := 1; k < length; k++ {
+			if c := base + m.lengthCost(k+1); c < cost[i+k] {
+				cost[i+k] = c
+				dist[i+k] = uint16(k + 1)
+			}
+		}
+	}
+
+	path = path[:0]
+
+	for i := n - 1; i >= 0; {
+		l := int(dist[i])
+		path = append(path, l)
+		i -= l
+	}
+
+	slices.Reverse(path)
+
+	refs = refs[:0]
+	i := 0
+
+	for _, l := range path {
+		if l == 1 {
+			refs = append(refs, literalRef(argb[i]))
+		} else {
+			refs = append(refs, copyRef(uint32(chain.findOffset(i)), l))
+		}
+
+		i += l
+	}
+
+	return refs, path
 }

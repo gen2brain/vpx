@@ -106,6 +106,13 @@ type losslessEncoder struct {
 	groupCost  []float64
 	pairCost   []float64
 	meta       []uint32
+	cross      []uint32
+	snap       []byte
+	model      costModel
+	cost       []float64
+	dpLen      []uint16
+	path       []int
+	optimal    bool
 	topRefs    []ref
 
 	method     int
@@ -256,6 +263,26 @@ func (e *losslessEncoder) bestRefs(argb []uint32, xsize, quality int, lowEffort 
 	}
 
 	e.alt = backwardRefsRle(argb, xsize, e.alt)
+
+	if e.refsCost(e.alt, xsize) < e.refsCost(e.refs, xsize) {
+		e.refs, e.alt = e.alt, e.refs
+	}
+
+	if !e.optimal {
+		return e.refs
+	}
+
+	cacheBits := e.bestCacheBits(argb, e.refs)
+
+	e.hist.reset(cacheBits)
+	e.hist.storeRefs(e.refs, xsize)
+	e.model.build(&e.hist, cacheBits)
+
+	e.cost = grow(e.cost, len(argb))
+	e.dpLen = grow(e.dpLen, len(argb))
+
+	e.alt, e.path = backwardRefsCost(argb, xsize, &e.chain, cacheBits,
+		&e.model, &e.cache, e.cost, e.dpLen, e.path, e.alt)
 
 	if e.refsCost(e.alt, xsize) < e.refsCost(e.refs, xsize) {
 		e.refs, e.alt = e.alt, e.refs
@@ -451,6 +478,7 @@ func (e *losslessEncoder) encodeStream(w *lbitWriter, argb []uint32, width, heig
 
 	e.method = o.Method
 	e.palettized = false
+	e.optimal = !lowEffort
 
 	palette, usePalette := e.pmap.build(argb, e.palette)
 	e.palette = palette
@@ -488,11 +516,45 @@ func (e *losslessEncoder) encodeStream(w *lbitWriter, argb []uint32, width, heig
 
 		residualImage(argb, width, height, bits, lowEffort, o.Exact, e.modes, e.rows)
 		e.encodeImage(w, e.modes, tw, o.Quality, lowEffort, false)
+
+		if o.Method >= 6 && !redBlueAlwaysZero(argb) {
+			e.crossColorPass(w, argb, width, height, bits, tw, th, xsize, o)
+
+			return
+		}
 	}
 
 	w.write(0, 1)
 
 	e.encodeImage(w, argb, xsize, o.Quality, lowEffort, true)
+}
+
+func (e *losslessEncoder) crossColorPass(w *lbitWriter, argb []uint32, width, height, bits, tw, th, xsize int, o Options) {
+	mark := w.mark()
+
+	w.write(0, 1)
+	e.encodeImage(w, argb, xsize, o.Quality, false, true)
+
+	plain := w.snapshot(mark, e.snap)
+	e.snap = plain.buf
+
+	w.restore(mark)
+
+	e.cross = grow(e.cross, tw*th)
+
+	putTransform(w, crossColorTransform)
+	w.write(uint32(bits-2), 3)
+
+	crossColorImage(argb, width, height, bits, e.cross)
+	e.encodeImage(w, e.cross, tw, o.Quality, false, false)
+
+	w.write(0, 1)
+	e.encodeImage(w, argb, xsize, o.Quality, false, true)
+
+	if w.count(mark) > plain.count(mark) {
+		w.restore(mark)
+		w.splice(mark, plain)
+	}
 }
 
 func hasAlpha(argb []uint32) bool {

@@ -136,9 +136,9 @@ func (d *losslessDecoder) release() {
 	d.br = lbitReader{}
 }
 
-func grow(b []uint32, n int) []uint32 {
+func grow[T any](b []T, n int) []T {
 	if cap(b) < n {
-		return make([]uint32, n)
+		return make([]T, n)
 	}
 
 	return b[:n]
