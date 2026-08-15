@@ -70,19 +70,45 @@ func (h *histogram) planes() [treesPerGroup][]uint32 {
 	}
 }
 
+func planeCost(p []uint32) float64 {
+	sum, used, total := uint32(0), 0, 0.0
+
+	for _, v := range p {
+		if v == 0 {
+			continue
+		}
+
+		used++
+		sum += v
+		total += shannon(v)
+	}
+
+	return shannon(sum) - total + float64(5*used) + 40
+}
+
+func planeMergeCost(x, y []uint32) float64 {
+	sum, used, total := uint32(0), 0, 0.0
+
+	for i, xi := range x {
+		v := xi + y[i]
+
+		if v == 0 {
+			continue
+		}
+
+		used++
+		sum += v
+		total += shannon(v)
+	}
+
+	return shannon(sum) - total + float64(5*used) + 40
+}
+
 func (h *histogram) cost() float64 {
 	cost := 0.0
 
 	for _, p := range h.planes() {
-		used := 0
-
-		for _, c := range p {
-			if c > 0 {
-				used++
-			}
-		}
-
-		cost += entropy(p) + float64(5*used) + 40
+		cost += planeCost(p)
 	}
 
 	return cost
@@ -175,12 +201,16 @@ func (e *losslessEncoder) clusterBlocks(n int, cacheBits uint) int {
 	return e.mergeGroups(n, groups, cacheBits)
 }
 
-func (e *losslessEncoder) mergedCost(a, b int, cacheBits uint) float64 {
-	e.mergeHist.reset(cacheBits)
-	e.mergeHist.add(&e.groupHist[a])
-	e.mergeHist.add(&e.groupHist[b])
+func (e *losslessEncoder) mergedCost(a, b int) float64 {
+	x, y := e.groupHist[a].planes(), e.groupHist[b].planes()
 
-	return e.mergeHist.cost()
+	cost := 0.0
+
+	for i := range x {
+		cost += planeMergeCost(x[i], y[i])
+	}
+
+	return cost
 }
 
 func (e *losslessEncoder) mergeGroups(n, groups int, cacheBits uint) int {
@@ -200,7 +230,7 @@ func (e *losslessEncoder) mergeGroups(n, groups int, cacheBits uint) int {
 
 	for a := range groups {
 		for b := a + 1; b < groups; b++ {
-			pair[a*metaBins+b] = e.mergedCost(a, b, cacheBits)
+			pair[a*metaBins+b] = e.mergedCost(a, b)
 		}
 	}
 
@@ -249,7 +279,7 @@ func (e *losslessEncoder) mergeGroups(n, groups int, cacheBits uint) int {
 				}
 
 				lo, hi := min(g, o), max(g, o)
-				pair[lo*metaBins+hi] = e.mergedCost(lo, hi, cacheBits)
+				pair[lo*metaBins+hi] = e.mergedCost(lo, hi)
 			}
 		}
 	}

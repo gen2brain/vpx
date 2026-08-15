@@ -392,6 +392,7 @@ type costModel struct {
 	blue    [numLiteralCodes]float64
 	alpha   [numLiteralCodes]float64
 	dist    [numDistanceCodes]float64
+	lengths []float64
 }
 
 func bitEstimates(counts []uint32, out []float64) {
@@ -442,6 +443,17 @@ func (m *costModel) build(h *histogram, cacheBits uint) {
 	bitEstimates(h.blue[:], m.blue[:])
 	bitEstimates(h.alpha[:], m.alpha[:])
 	bitEstimates(h.dist[:], m.dist[:])
+
+	if cap(m.lengths) < maxLength+1 {
+		m.lengths = make([]float64, maxLength+1)
+	}
+
+	m.lengths = m.lengths[:maxLength+1]
+
+	for l := 1; l <= maxLength; l++ {
+		code, n, _ := prefixEncode(l)
+		m.lengths[l] = m.literal[numLiteralCodes+code] + float64(n)
+	}
 }
 
 func (m *costModel) literalCost(v uint32) float64 {
@@ -452,19 +464,16 @@ func (m *costModel) cacheCost(key uint32) float64 {
 	return m.literal[numLiteralCodes+numLengthCodes+int(key)]
 }
 
-func (m *costModel) lengthCost(l int) float64 {
-	code, n, _ := prefixEncode(l)
-
-	return m.literal[numLiteralCodes+code] + float64(n)
-}
-
 func (m *costModel) distanceCost(planeCode int) float64 {
 	code, n, _ := prefixEncode(planeCode)
 
 	return m.dist[code] + float64(n)
 }
 
-const costFudge = 68065.0 / 65536
+const (
+	costFudge   = 68065.0 / 65536
+	costMaxSpan = 256
+)
 
 func backwardRefsCost(argb []uint32, xsize int, chain *hashChain, cacheBits uint,
 	m *costModel, cache *colorCache, cost []float64, dist []uint16, path []int, refs []ref,
@@ -514,10 +523,19 @@ func backwardRefsCost(argb []uint32, xsize int, chain *hashChain, cacheBits uint
 
 		base := prev + m.distanceCost(distanceToPlaneCode(xsize, chain.findOffset(i)))
 
-		for k := 1; k < length; k++ {
-			if c := base + m.lengthCost(k+1); c < cost[i+k] {
+		span := min(length, costMaxSpan)
+
+		for k := 1; k < span; k++ {
+			if c := base + m.lengths[k+1]; c < cost[i+k] {
 				cost[i+k] = c
 				dist[i+k] = uint16(k + 1)
+			}
+		}
+
+		if length > span {
+			if c := base + m.lengths[length]; c < cost[i+length-1] {
+				cost[i+length-1] = c
+				dist[i+length-1] = uint16(length)
 			}
 		}
 	}

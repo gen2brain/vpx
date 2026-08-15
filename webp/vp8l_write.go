@@ -102,7 +102,6 @@ type losslessEncoder struct {
 	blockGroup []int
 	groupHist  []histogram
 	groupCodes [][treesPerGroup]huffCode
-	mergeHist  histogram
 	groupCost  []float64
 	pairCost   []float64
 	meta       []uint32

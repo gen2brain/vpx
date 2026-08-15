@@ -30,9 +30,19 @@ func subtractGreenForward(px []uint32) {
 	}
 }
 
+var slog2 = func() [1 << 12]float64 {
+	var t [1 << 12]float64
+
+	for i := 1; i < len(t); i++ {
+		t[i] = float64(i) * math.Log2(float64(i))
+	}
+
+	return t
+}()
+
 func shannon(v uint32) float64 {
-	if v == 0 {
-		return 0
+	if v < uint32(len(slog2)) {
+		return slog2[v]
 	}
 
 	return float64(v) * math.Log2(float64(v))
