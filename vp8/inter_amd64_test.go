@@ -276,7 +276,7 @@ func BenchmarkEncoderKernels(b *testing.B) {
 	}
 }
 
-func TestFilterKernelsSSEAndAVX512(t *testing.T) {
+func TestFilterKernelsAllPaths(t *testing.T) {
 	const (
 		stride = 64
 		rows   = 40
@@ -288,9 +288,11 @@ func TestFilterKernelsSSEAndAVX512(t *testing.T) {
 	want := make([]byte, stride*rows)
 	sse := make([]byte, stride*rows)
 	avx := make([]byte, stride*rows)
+	av2 := make([]byte, stride*rows)
 	wantV := make([]byte, stride*rows)
 	sseV := make([]byte, stride*rows)
 	avxV := make([]byte, stride*rows)
+	av2V := make([]byte, stride*rows)
 	rowWalk := make([]int, rows)
 	colWalk := make([]int, stride)
 
@@ -300,17 +302,24 @@ func TestFilterKernelsSSEAndAVX512(t *testing.T) {
 		f := randFInfo(r)
 		off := (8+r.IntN(8))*stride + 8 + r.IntN(16)
 
-		for _, p := range [][]byte{want, sse, avx, wantV, sseV, avxV} {
+		for _, p := range [][]byte{want, sse, avx, av2, wantV, sseV, avxV, av2V} {
 			copy(p, src)
 		}
 
-		switch iter & 7 {
+		kind := iter & 7
+		av2Path := hasAVX2 && kind < 4
+
+		switch kind {
 		case 0:
 			vFilterLoop26(want, off, stride, 16, f)
 			vFilter16SSE(&sse[off], stride, f.limit, f.ilevel, f.hevThresh)
 
 			if hasAVX512 {
 				vFilter16AVX512(&avx[off], stride, f.limit, f.ilevel, f.hevThresh)
+			}
+
+			if hasAVX2 {
+				vFilter16AVX2(&av2[off], stride, f.limit, f.ilevel, f.hevThresh)
 			}
 		case 1:
 			for k := range 3 {
@@ -322,6 +331,10 @@ func TestFilterKernelsSSEAndAVX512(t *testing.T) {
 			if hasAVX512 {
 				vFilter16iAVX512(&avx[off], stride, f.limit, f.ilevel, f.hevThresh)
 			}
+
+			if hasAVX2 {
+				vFilter16iAVX2(&av2[off], stride, f.limit, f.ilevel, f.hevThresh)
+			}
 		case 2:
 			vFilterLoop26(want, off, stride, 8, f)
 			vFilterLoop26(wantV, off, stride, 8, f)
@@ -330,6 +343,10 @@ func TestFilterKernelsSSEAndAVX512(t *testing.T) {
 			if hasAVX512 {
 				vFilter8AVX512(&avx[off], &avxV[off], stride, f.limit, f.ilevel, f.hevThresh)
 			}
+
+			if hasAVX2 {
+				vFilter8AVX2(&av2[off], &av2V[off], stride, f.limit, f.ilevel, f.hevThresh)
+			}
 		case 3:
 			vFilterLoop24(want, off+4*stride, stride, 8, f)
 			vFilterLoop24(wantV, off+4*stride, stride, 8, f)
@@ -337,6 +354,10 @@ func TestFilterKernelsSSEAndAVX512(t *testing.T) {
 
 			if hasAVX512 {
 				vFilter8iAVX512(&avx[off], &avxV[off], stride, f.limit, f.ilevel, f.hevThresh)
+			}
+
+			if hasAVX2 {
+				vFilter8iAVX2(&av2[off], &av2V[off], stride, f.limit, f.ilevel, f.hevThresh)
 			}
 		case 4:
 			hFilterLoop26(want, off, stride, 16, f)
@@ -380,6 +401,10 @@ func TestFilterKernelsSSEAndAVX512(t *testing.T) {
 		if hasAVX512 && (!bytes.Equal(want, avx) || !bytes.Equal(wantV, avxV)) {
 			t.Fatalf("iter %d: AVX512 mismatch off=%d %+v", iter, off, f)
 		}
+
+		if av2Path && (!bytes.Equal(want, av2) || !bytes.Equal(wantV, av2V)) {
+			t.Fatalf("iter %d: AVX2 mismatch off=%d %+v", iter, off, f)
+		}
 	}
 }
 
@@ -406,13 +431,14 @@ func BenchmarkLoopFilter(b *testing.B) {
 		name string
 		sse  func()
 		avx  func()
+		av2  func()
 	}{
-		{"v16", func() { vFilter16SSE(&p[off], stride, f.limit, f.ilevel, f.hevThresh) }, func() { vFilter16AVX512(&p[off], stride, f.limit, f.ilevel, f.hevThresh) }},
-		{"v16i", func() { vFilter16iSSE(&p[off], stride, f.limit, f.ilevel, f.hevThresh) }, func() { vFilter16iAVX512(&p[off], stride, f.limit, f.ilevel, f.hevThresh) }},
-		{"h16", func() { hFilter16SSE(&p[off], stride, f.limit, f.ilevel, f.hevThresh) }, func() { hFilter16AVX512(&p[off], stride, f.limit, f.ilevel, f.hevThresh) }},
-		{"h16i", func() { hFilter16iSSE(&p[off], stride, f.limit, f.ilevel, f.hevThresh) }, func() { hFilter16iAVX512(&p[off], stride, f.limit, f.ilevel, f.hevThresh) }},
-		{"v8", func() { vFilter8SSE(&p[off], &q[off], stride, f.limit, f.ilevel, f.hevThresh) }, func() { vFilter8AVX512(&p[off], &q[off], stride, f.limit, f.ilevel, f.hevThresh) }},
-		{"h8i", func() { hFilter8iSSE(&p[off], &q[off], stride, f.limit, f.ilevel, f.hevThresh) }, func() { hFilter8iAVX512(&p[off], &q[off], stride, f.limit, f.ilevel, f.hevThresh) }},
+		{"v16", func() { vFilter16SSE(&p[off], stride, f.limit, f.ilevel, f.hevThresh) }, func() { vFilter16AVX512(&p[off], stride, f.limit, f.ilevel, f.hevThresh) }, func() { vFilter16AVX2(&p[off], stride, f.limit, f.ilevel, f.hevThresh) }},
+		{"v16i", func() { vFilter16iSSE(&p[off], stride, f.limit, f.ilevel, f.hevThresh) }, func() { vFilter16iAVX512(&p[off], stride, f.limit, f.ilevel, f.hevThresh) }, func() { vFilter16iAVX2(&p[off], stride, f.limit, f.ilevel, f.hevThresh) }},
+		{"h16", func() { hFilter16SSE(&p[off], stride, f.limit, f.ilevel, f.hevThresh) }, func() { hFilter16AVX512(&p[off], stride, f.limit, f.ilevel, f.hevThresh) }, nil},
+		{"h16i", func() { hFilter16iSSE(&p[off], stride, f.limit, f.ilevel, f.hevThresh) }, func() { hFilter16iAVX512(&p[off], stride, f.limit, f.ilevel, f.hevThresh) }, nil},
+		{"v8", func() { vFilter8SSE(&p[off], &q[off], stride, f.limit, f.ilevel, f.hevThresh) }, func() { vFilter8AVX512(&p[off], &q[off], stride, f.limit, f.ilevel, f.hevThresh) }, func() { vFilter8AVX2(&p[off], &q[off], stride, f.limit, f.ilevel, f.hevThresh) }},
+		{"h8i", func() { hFilter8iSSE(&p[off], &q[off], stride, f.limit, f.ilevel, f.hevThresh) }, func() { hFilter8iAVX512(&p[off], &q[off], stride, f.limit, f.ilevel, f.hevThresh) }, nil},
 	}
 
 	for _, k := range kernels {
@@ -426,6 +452,14 @@ func BenchmarkLoopFilter(b *testing.B) {
 			b.Run(k.name+"/AVX512", func(b *testing.B) {
 				for b.Loop() {
 					k.avx()
+				}
+			})
+		}
+
+		if hasAVX2 && k.av2 != nil {
+			b.Run(k.name+"/AVX2", func(b *testing.B) {
+				for b.Loop() {
+					k.av2()
 				}
 			})
 		}

@@ -12,6 +12,18 @@ func cpuidAVX2() bool
 func cpuidAVX512() bool
 
 //go:noescape
+func vFilter16AVX2(p *byte, stride, limit, ilevel, hevThresh int)
+
+//go:noescape
+func vFilter16iAVX2(p *byte, stride, limit, ilevel, hevThresh int)
+
+//go:noescape
+func vFilter8AVX2(u, v *byte, stride, limit, ilevel, hevThresh int)
+
+//go:noescape
+func vFilter8iAVX2(u, v *byte, stride, limit, ilevel, hevThresh int)
+
+//go:noescape
 func vFilter16AVX512(p *byte, stride, limit, ilevel, hevThresh int)
 
 //go:noescape
@@ -194,6 +206,25 @@ func dspInit() {
 		}
 
 		quantizeSSE(&in[0], &out[0], m)
+	}
+
+	if hasAVX2 && !hasAVX512 {
+		vFilter16Asm = func(p []byte, off, stride, limit, ilevel, hevThresh int) {
+			vFilter16AVX2(&p[off], stride, limit, ilevel, hevThresh)
+		}
+
+		vFilter16iAsm = func(p []byte, off, stride, limit, ilevel, hevThresh int) {
+			vFilter16iAVX2(&p[off], stride, limit, ilevel, hevThresh)
+		}
+
+		vFilter8Asm = func(u, v []byte, off, stride, limit, ilevel, hevThresh int) {
+			vFilter8AVX2(&u[off], &v[off], stride, limit, ilevel, hevThresh)
+		}
+
+		vFilter8iAsm = func(u, v []byte, off, stride, limit, ilevel, hevThresh int) {
+			vFilter8iAVX2(&u[off], &v[off], stride, limit, ilevel, hevThresh)
+		}
+
 	}
 
 	if hasAVX512 {
