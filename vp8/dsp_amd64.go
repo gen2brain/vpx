@@ -57,6 +57,15 @@ func fTransformSSE(src, ref *byte, out *int16)
 //go:noescape
 func quantizeSSE(in, out *int16, m *qmatrix)
 
+//go:noescape
+func sseAVX2(a, b *byte, size int) int
+
+//go:noescape
+func quantizeAVX2(in, out *int16, m *qmatrix)
+
+//go:noescape
+func fTransform2AVX2(src, ref *byte, out *int16)
+
 func dspInit() {
 	vFilter16Asm = func(p []byte, off, stride, limit, ilevel, hevThresh int) {
 		vFilter16SSE(&p[off], stride, limit, ilevel, hevThresh)
@@ -115,6 +124,10 @@ func dspInit() {
 	}
 
 	sseAsm = func(a, b []byte, off, size int) int {
+		if hasAVX2 && size == 16 {
+			return sseAVX2(&a[off], &b[off], size)
+		}
+
 		return sseSSE(&a[off], &b[off], size)
 	}
 
@@ -122,7 +135,19 @@ func dspInit() {
 		fTransformSSE(&src[sOff], &ref[rOff], &out[0])
 	}
 
+	if hasAVX2 {
+		fTransform2Asm = func(src, ref []byte, sOff, rOff int, out []int16) {
+			fTransform2AVX2(&src[sOff], &ref[rOff], &out[0])
+		}
+	}
+
 	quantizeAsm = func(in, out []int16, m *qmatrix) {
+		if hasAVX2 {
+			quantizeAVX2(&in[0], &out[0], m)
+
+			return
+		}
+
 		quantizeSSE(&in[0], &out[0], m)
 	}
 

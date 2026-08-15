@@ -82,6 +82,18 @@ func fTransform(src, ref []byte, sOff, rOff int, out []int16) {
 	fTransformGo(src, ref, sOff, rOff, out)
 }
 
+func fTransform2(src, ref []byte, sOff, rOff int, out []int16) {
+	if fTransform2Asm != nil && sOff >= 0 && rOff >= 0 &&
+		len(src)-sOff >= 3*bps+8 && len(ref)-rOff >= 3*bps+8 && len(out) >= 32 {
+		fTransform2Asm(src, ref, sOff, rOff, out)
+
+		return
+	}
+
+	fTransform(src, ref, sOff, rOff, out)
+	fTransform(src, ref, sOff+4, rOff+4, out[16:])
+}
+
 func fTransformGo(src, ref []byte, sOff, rOff int, out []int16) {
 	var tmp [16]int
 

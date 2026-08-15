@@ -217,8 +217,8 @@ func (e *Encoder) pickChromaMode(mbX, mbY int) uint8 {
 func (e *Encoder) transformLuma(m *mbData) uint32 {
 	b := e.rec.yuv[:]
 
-	for n := range 16 {
-		fTransform(e.sc[:], b, yOff+scan[n], yOff+scan[n], m.coeffs[16*n:])
+	for n := 0; n < 16; n += 2 {
+		fTransform2(e.sc[:], b, yOff+scan[n], yOff+scan[n], m.coeffs[16*n:])
 	}
 
 	fTransformWHT(m.coeffs[:], e.dc[:])
