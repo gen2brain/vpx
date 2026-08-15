@@ -212,6 +212,16 @@ func decodeLossless(data []byte, o Options) (image.Image, error) {
 }
 
 func argbToRGBA(dst []byte, px []uint32) {
+	if argbToRGBAAsm != nil && len(px) > 0 && len(dst) >= 4*len(px) {
+		argbToRGBAAsm(dst, px)
+
+		return
+	}
+
+	argbToRGBAScalar(dst, px)
+}
+
+func argbToRGBAScalar(dst []byte, px []uint32) {
 	for i, argb := range px {
 		p := dst[4*i : 4*i+4 : 4*i+4]
 		p[0] = uint8(argb >> 16)
