@@ -2,6 +2,7 @@ package webp
 
 import (
 	"bytes"
+	"fmt"
 	"image"
 	"image/draw"
 	"io"
@@ -143,6 +144,20 @@ func BenchmarkEncodeLossy(b *testing.B) {
 
 				for b.Loop() {
 					if err := Encode(io.Discard, img, Options{Quality: 75, Threads: n}); err != nil {
+						b.Fatal(err)
+					}
+				}
+			})
+		}
+
+		for _, m := range []int{0, 3, 6} {
+			b.Run(fmt.Sprintf("%s/m%d", name, m), func(b *testing.B) {
+				r := img.Bounds()
+
+				b.SetBytes(int64(4 * r.Dx() * r.Dy()))
+
+				for b.Loop() {
+					if err := Encode(io.Discard, img, Options{Quality: 75, Method: m}); err != nil {
 						b.Fatal(err)
 					}
 				}

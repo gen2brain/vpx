@@ -258,7 +258,7 @@ func (e *Encoder) writeRows(p *encPipeline) {
 		e.ctx[0] = mbCtx{}
 
 		for mbX := range e.mbW {
-			e.writeMB(mbX, &lv[mbX], e.info[msg.row*e.mbW+mbX].skip)
+			e.writeMB(mbX, &lv[mbX], e.info[msg.row*e.mbW+mbX])
 		}
 
 		p.free <- msg.slot
@@ -275,6 +275,7 @@ func (e *Encoder) encodeRows() {
 			e.rec.initRowContext(mbY)
 
 			e.ctx[0] = mbCtx{}
+			e.leftB = [4]uint8{}
 
 			for mbX := range e.mbW {
 				e.loadSource(mbX, mbY)
@@ -299,6 +300,8 @@ func (e *Encoder) encodeRows() {
 
 		e.rec.initScanline()
 		e.rec.initRowContext(mbY)
+
+		e.leftB = [4]uint8{}
 
 		for mbX := range e.mbW {
 			e.loadSource(mbX, mbY)

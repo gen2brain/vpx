@@ -25,6 +25,8 @@ type mbInfo struct {
 	ymode  uint8
 	uvMode uint8
 	skip   bool
+	i4x4   bool
+	imodes [16]uint8
 }
 
 // Encoder encodes VP8 key frames. The zero value is ready to use, and reusing
@@ -54,11 +56,18 @@ type Encoder struct {
 	tok boolEnc
 	out []byte
 
-	sc      [yuvSize]uint8
-	lv      mbLevels
-	pipe    *encPipeline
-	threads int
-	dc      [16]int16
+	sc       [yuvSize]uint8
+	lv       mbLevels
+	pipe     *encPipeline
+	topB     []uint8
+	leftB    [4]uint8
+	tryI4    bool
+	i4Levels [16]int16
+	i4Coeffs [16]int16
+	rdI16    bool
+	saved    i16State
+	threads  int
+	dc       [16]int16
 }
 
 func qualityToQuant(quality int) int {
@@ -74,6 +83,8 @@ func qualityToQuant(quality int) int {
 
 func (e *Encoder) setup(o EncodeOptions) {
 	e.threads = o.Threads
+	e.tryI4 = o.Method >= 3
+	e.rdI16 = o.Method >= 5
 	e.baseQ = qualityToQuant(o.Quality)
 
 	e.y1.q[0] = uint32(dcTable[e.baseQ])
@@ -121,6 +132,14 @@ func (e *Encoder) alloc() {
 	}
 
 	e.ctx = e.ctx[:e.mbW+1]
+
+	if cap(e.topB) < 4*e.mbW {
+		e.topB = make([]uint8, 4*e.mbW)
+	}
+
+	e.topB = e.topB[:4*e.mbW]
+
+	clear(e.topB)
 
 	clear(e.ctx)
 }
@@ -281,7 +300,7 @@ func (e *Encoder) transformChroma(m *mbData, lv *mbLevels) uint32 {
 
 func (e *Encoder) codeMB(mbX, mbY int, lv *mbLevels) {
 	e.analyzeMB(mbX, mbY, lv)
-	e.writeMB(mbX, lv, e.info[mbY*e.mbW+mbX].skip)
+	e.writeMB(mbX, lv, e.info[mbY*e.mbW+mbX])
 }
 
 // analyzeMB picks the modes, transforms and quantizes. It reconstructs through
@@ -294,8 +313,31 @@ func (e *Encoder) analyzeMB(mbX, mbY int, lv *mbLevels) {
 
 	m.isI4x4 = false
 	m.segment = 0
-	m.imodes[0] = e.pickLumaMode(mbX, mbY)
-	m.nonZeroY = e.transformLuma(m, lv)
+	i16 := e.lumaI16(mbX, mbY, m, lv)
+
+	if e.tryI4 {
+
+		e.saved.store(m, lv)
+
+		i4, bits := e.pickIntra4(mbX, mbY, m, lv)
+
+		if i4+e.lambdaMode*probCost(145, 0) < i16+e.lambdaMode*probCost(145, 1) {
+			m.isI4x4 = true
+			m.nonZeroY = bits
+			lv.nz[y2Block] = 0
+		} else {
+			e.saved.restore(m, lv)
+		}
+	}
+
+	if !m.isI4x4 {
+		top := e.topB[4*mbX : 4*mbX+4 : 4*mbX+4]
+
+		for i := range 4 {
+			top[i] = m.imodes[0]
+			e.leftB[i] = m.imodes[0]
+		}
+	}
 
 	m.uvMode = e.pickChromaMode(mbX, mbY)
 	m.nonZeroUV = e.transformChroma(m, lv)
@@ -305,20 +347,106 @@ func (e *Encoder) analyzeMB(mbX, mbY int, lv *mbLevels) {
 	m.skip = skip
 	m.skipped = skip
 
-	e.info[mbY*e.mbW+mbX] = mbInfo{ymode: m.imodes[0], uvMode: m.uvMode, skip: skip}
+	info := mbInfo{ymode: m.imodes[0], uvMode: m.uvMode, skip: skip, i4x4: m.isI4x4}
+	if m.isI4x4 {
+		info.imodes = m.imodes
+	}
+
+	e.info[mbY*e.mbW+mbX] = info
+}
+
+type i16State struct {
+	coeffs [384]int16
+	levels [y2Block + 1][16]int16
+	nz     [y2Block + 1]int
+	nonZY  uint32
+	ymode  uint8
+}
+
+func (s *i16State) store(m *mbData, lv *mbLevels) {
+	s.coeffs = m.coeffs
+	s.levels = lv.levels
+	s.nz = lv.nz
+	s.nonZY = m.nonZeroY
+	s.ymode = m.imodes[0]
+}
+
+func (s *i16State) restore(m *mbData, lv *mbLevels) {
+	m.coeffs = s.coeffs
+	lv.levels = s.levels
+	lv.nz = s.nz
+	m.nonZeroY = s.nonZY
+	m.imodes[0] = s.ymode
+}
+
+func (e *Encoder) lumaI16(mbX, mbY int, m *mbData, lv *mbLevels) int {
+	if !e.rdI16 {
+		m.imodes[0] = e.pickLumaMode(mbX, mbY)
+		m.nonZeroY = e.transformLuma(m, lv)
+
+		return e.scoreIntra16(m, lv)
+	}
+
+	b := e.rec.yuv[:]
+	best := math.MaxInt
+
+	for mode := range 4 {
+		predLuma16[checkMode(mbX, mbY, mode)](b, yOff)
+
+		m.imodes[0] = uint8(mode)
+		m.nonZeroY = e.transformLuma(m, lv)
+
+		if s := e.scoreIntra16(m, lv); s < best {
+			best = s
+			e.saved.store(m, lv)
+		}
+	}
+
+	e.saved.restore(m, lv)
+
+	return best
+}
+
+func (e *Encoder) scoreIntra16(m *mbData, lv *mbLevels) int {
+	b := e.rec.yuv[:]
+
+	bits := m.nonZeroY
+
+	for n := range 16 {
+		doTransform(bits, m.coeffs[n*16:n*16+16], b, yOff+scan[n])
+		bits <<= 2
+	}
+
+	rate := fixedCostsI16[m.imodes[0]]
+	rate += coeffCost(&e.proba.bandsPtr[1], 0, 0, lv.levels[y2Block][:], lv.nz[y2Block])
+
+	for n := range 16 {
+		rate += coeffCost(&e.proba.bandsPtr[0], 0, 1, lv.levels[n][:], lv.nz[n])
+	}
+
+	return 256*sse(e.sc[:], b, yOff, 16) + e.lambdaMode*rate
 }
 
 // writeMB is the token stage. It owns tok and ctx, and reads only the levels
 // and the skip flag analyzeMB produced.
-func (e *Encoder) writeMB(mbX int, lv *mbLevels, skip bool) {
-	if skip {
-		e.ctx[1+mbX] = mbCtx{}
-		e.ctx[0] = mbCtx{}
+func (e *Encoder) writeMB(mbX int, lv *mbLevels, info mbInfo) {
+	if info.skip {
+		top := &e.ctx[1+mbX]
+		left := &e.ctx[0]
+
+		dcT, dcL := top.nzDC, left.nzDC
+
+		*top = mbCtx{}
+		*left = mbCtx{}
+
+		if info.i4x4 {
+			top.nzDC, left.nzDC = dcT, dcL
+		}
 
 		return
 	}
 
-	e.putResiduals(mbX, lv)
+	e.putResiduals(mbX, lv, info.i4x4)
 }
 
 func b2i(v bool) int {
@@ -450,23 +578,27 @@ func putCoeffs(w *boolEnc, bands *[17]*bandProbs, ctx, first int, levels []int16
 	}
 }
 
-func (e *Encoder) putResiduals(mbX int, lv *mbLevels) {
+func (e *Encoder) putResiduals(mbX int, lv *mbLevels, i4x4 bool) {
 	w := &e.tok
 	top := &e.ctx[1+mbX]
 	left := &e.ctx[0]
 
-	putCoeffs(w, &e.proba.bandsPtr[1], int(top.nzDC)+int(left.nzDC), 0, lv.levels[y2Block][:], lv.nz[y2Block])
+	first := 0
+	acBands := &e.proba.bandsPtr[3]
 
-	nzDC := uint8(0)
-	if lv.nz[y2Block] > 0 {
-		nzDC = 1
+	if !i4x4 {
+		putCoeffs(w, &e.proba.bandsPtr[1], int(top.nzDC)+int(left.nzDC), 0, lv.levels[y2Block][:], lv.nz[y2Block])
+
+		nzDC := uint8(0)
+		if lv.nz[y2Block] > 0 {
+			nzDC = 1
+		}
+
+		top.nzDC, left.nzDC = nzDC, nzDC
+
+		first = 1
+		acBands = &e.proba.bandsPtr[0]
 	}
-
-	top.nzDC, left.nzDC = nzDC, nzDC
-
-	const first = 1
-
-	acBands := &e.proba.bandsPtr[0]
 
 	tnz := top.nz & 0x0f
 	lnz := left.nz & 0x0f
@@ -534,26 +666,55 @@ func (e *Encoder) putResiduals(mbX int, lv *mbLevels) {
 func (e *Encoder) putModes() {
 	w := &e.hdr
 
-	for _, m := range e.info {
+	clear(e.topB)
+
+	for i, m := range e.info {
+		mbX := i % e.mbW
+
+		if mbX == 0 {
+			e.leftB = [4]uint8{}
+		}
+
 		if e.useSkip {
 			w.putBool(m.skip, e.skipProb)
 		}
 
-		w.putBit(1, 145)
+		top := e.topB[4*mbX : 4*mbX+4 : 4*mbX+4]
 
-		switch m.ymode {
-		case dcPred:
-			w.putBit(0, 156)
-			w.putBit(0, 163)
-		case vPred:
-			w.putBit(0, 156)
-			w.putBit(1, 163)
-		case hPred:
-			w.putBit(1, 156)
-			w.putBit(0, 128)
-		default:
-			w.putBit(1, 156)
-			w.putBit(1, 128)
+		if m.i4x4 {
+			w.putBit(0, 145)
+
+			for n := range 16 {
+				x, y := n&3, n>>2
+				mode := m.imodes[n]
+
+				putBMode(w, &bModeProbs[top[x]][e.leftB[y]], mode)
+
+				top[x] = mode
+				e.leftB[y] = mode
+			}
+		} else {
+			w.putBit(1, 145)
+
+			switch m.ymode {
+			case dcPred:
+				w.putBit(0, 156)
+				w.putBit(0, 163)
+			case vPred:
+				w.putBit(0, 156)
+				w.putBit(1, 163)
+			case hPred:
+				w.putBit(1, 156)
+				w.putBit(0, 128)
+			default:
+				w.putBit(1, 156)
+				w.putBit(1, 128)
+			}
+
+			for j := range 4 {
+				top[j] = m.ymode
+				e.leftB[j] = m.ymode
+			}
 		}
 
 		switch m.uvMode {

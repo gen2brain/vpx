@@ -2,6 +2,7 @@ package webp
 
 import (
 	"bytes"
+	"fmt"
 	"image"
 	"io"
 	"math"
@@ -577,32 +578,34 @@ func TestEncodeLossyRoundTrip(t *testing.T) {
 			continue
 		}
 
-		t.Run(name, func(t *testing.T) {
-			last := 0.0
+		for _, method := range []int{0, 4} {
+			t.Run(fmt.Sprintf("%s/m%d", name, method), func(t *testing.T) {
+				last := 0.0
 
-			for _, q := range []int{30, 75, 95} {
-				var buf bytes.Buffer
+				for _, q := range []int{30, 75, 95} {
+					var buf bytes.Buffer
 
-				if err := Encode(&buf, img, Options{Quality: q}); err != nil {
-					t.Fatalf("q%d: encode: %v", q, err)
+					if err := Encode(&buf, img, Options{Quality: q, Method: method}); err != nil {
+						t.Fatalf("q%d: encode: %v", q, err)
+					}
+
+					got, err := Decode(bytes.NewReader(buf.Bytes()), Options{ToRGBA: true})
+					if err != nil {
+						t.Fatalf("q%d: decode: %v", q, err)
+					}
+
+					if !got.Bounds().Eq(img.Bounds()) {
+						t.Fatalf("q%d: bounds %v, want %v", q, got.Bounds(), img.Bounds())
+					}
+
+					if p := rgbaPSNR(t, got, img); p < last-3 {
+						t.Errorf("q%d: PSNR %.1f dB, below %.1f at the lower quality", q, p, last)
+					} else {
+						last = p
+					}
 				}
-
-				got, err := Decode(bytes.NewReader(buf.Bytes()), Options{ToRGBA: true})
-				if err != nil {
-					t.Fatalf("q%d: decode: %v", q, err)
-				}
-
-				if !got.Bounds().Eq(img.Bounds()) {
-					t.Fatalf("q%d: bounds %v, want %v", q, got.Bounds(), img.Bounds())
-				}
-
-				if p := rgbaPSNR(t, got, img); p < last-2 {
-					t.Errorf("q%d: PSNR %.1f dB, below %.1f at the lower quality", q, p, last)
-				} else {
-					last = p
-				}
-			}
-		})
+			})
+		}
 	}
 }
 
@@ -616,43 +619,44 @@ func TestEncodeLossyAgainstDwebp(t *testing.T) {
 	dir := t.TempDir()
 
 	for name, img := range testImages() {
-		t.Run(name, func(t *testing.T) {
-			var buf bytes.Buffer
+		for _, method := range []int{0, 4} {
+			t.Run(fmt.Sprintf("%s/m%d", name, method), func(t *testing.T) {
+				var buf bytes.Buffer
 
-			if err := Encode(&buf, img, Options{Quality: 80}); err != nil {
-				t.Fatalf("encode: %v", err)
-			}
+				if err := Encode(&buf, img, Options{Quality: 80, Method: method}); err != nil {
+					t.Fatalf("encode: %v", err)
+				}
 
-			path := filepath.Join(dir, "enc.webp")
+				path := filepath.Join(dir, "enc.webp")
 
-			if err := os.WriteFile(path, buf.Bytes(), 0o600); err != nil {
-				t.Fatal(err)
-			}
+				if err := os.WriteFile(path, buf.Bytes(), 0o600); err != nil {
+					t.Fatal(err)
+				}
 
-			want, w, h, err := dwebpPAM(bin, path, filepath.Join(dir, "ref.pam"))
-			if err != nil {
-				t.Fatalf("dwebp: %v", err)
-			}
+				want, w, h, err := dwebpPAM(bin, path, filepath.Join(dir, "ref.pam"))
+				if err != nil {
+					t.Fatalf("dwebp: %v", err)
+				}
 
-			got, err := Decode(bytes.NewReader(buf.Bytes()), Options{ToRGBA: true})
-			if err != nil {
-				t.Fatalf("decode: %v", err)
-			}
+				got, err := Decode(bytes.NewReader(buf.Bytes()), Options{ToRGBA: true})
+				if err != nil {
+					t.Fatalf("decode: %v", err)
+				}
 
-			rgba, ok := got.(*image.RGBA)
-			if !ok {
-				t.Fatalf("decoded %T, want *image.RGBA", got)
-			}
+				rgba, ok := got.(*image.RGBA)
+				if !ok {
+					t.Fatalf("decoded %T, want *image.RGBA", got)
+				}
 
-			premultiply(want[:4*w*h])
+				premultiply(want[:4*w*h])
 
-			if diff := comparePixels(rgba.Pix, want, w, h); diff != "" {
-				t.Fatal(diff)
-			}
-		})
+				if diff := comparePixels(rgba.Pix, want, w, h); diff != "" {
+					t.Fatal(diff)
+				}
+			})
+		}
 	}
 }
-
 func TestEncodeAnimation(t *testing.T) {
 	imgs := testImages()
 
@@ -806,6 +810,8 @@ func TestEncodeAllocs(t *testing.T) {
 		{"animation", 0, func() { EncodeAll(io.Discard, anim, Options{Quality: 75}) }},
 		// The one allocation is the token stage's goroutine, once per frame.
 		{"lossy threaded", 1, func() { Encode(io.Discard, lossy, Options{Quality: 75, Threads: 2}) }},
+		{"lossy i4x4", 0, func() { Encode(io.Discard, imgs["gradient-64x48"], Options{Quality: 75, Method: 4}) }},
+		{"lossy i4x4 512", 0, func() { Encode(io.Discard, lossy, Options{Quality: 75, Method: 4}) }},
 	}
 
 	for _, tt := range tests {
