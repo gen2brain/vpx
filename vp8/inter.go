@@ -1,64 +1,100 @@
 package vp8
 
-const filterShift = 7
+const (
+	filterShift = 7
+	mcScratch   = (16 + 5) * 16
+)
 
 type predictor struct {
 	src    []byte
+	tmp    *[mcScratch]byte
 	stride int
 	sixtap bool
 }
 
 func (p *predictor) sub(src []byte) predictor {
-	return predictor{src: src, stride: p.stride, sixtap: p.sixtap}
+	return predictor{src: src, tmp: p.tmp, stride: p.stride, sixtap: p.sixtap}
 }
 
-func filterRow(dst []int32, src []byte, off, count int, f *[6]int16) {
-	for i := range count {
-		p := off + i
+func sixtapH(dst []byte, dOff, dStride int, src []byte, sOff, sStride, w, h int, f *[6]int16) {
+	if sixtapHAsm != nil {
+		sixtapHAsm(dst, dOff, dStride, src, sOff, sStride, w, h, f)
 
-		v := int32(src[p-2])*int32(f[0]) +
-			int32(src[p-1])*int32(f[1]) +
-			int32(src[p])*int32(f[2]) +
-			int32(src[p+1])*int32(f[3]) +
-			int32(src[p+2])*int32(f[4]) +
-			int32(src[p+3])*int32(f[5]) +
-			1<<(filterShift-1)
+		return
+	}
 
-		dst[i] = int32(clip8(int(v >> filterShift)))
+	sixtapHGo(dst, dOff, dStride, src, sOff, sStride, w, h, f)
+}
+
+func sixtapHGo(dst []byte, dOff, dStride int, src []byte, sOff, sStride, w, h int, f *[6]int16) {
+	for j := range h {
+		row := sOff + j*sStride
+		out := dOff + j*dStride
+
+		for i := range w {
+			p := row + i
+
+			v := int32(src[p-2])*int32(f[0]) +
+				int32(src[p-1])*int32(f[1]) +
+				int32(src[p])*int32(f[2]) +
+				int32(src[p+1])*int32(f[3]) +
+				int32(src[p+2])*int32(f[4]) +
+				int32(src[p+3])*int32(f[5]) +
+				1<<(filterShift-1)
+
+			dst[out+i] = clip8(int(v >> filterShift))
+		}
 	}
 }
 
-func filterCol(dst []byte, off, stride int, src []int32, w, h int, f *[6]int16) {
+func sixtapV(dst []byte, dOff, dStride int, src []byte, sOff, sStride, w, h int, f *[6]int16) {
+	if sixtapVAsm != nil {
+		sixtapVAsm(dst, dOff, dStride, src, sOff, sStride, w, h, f)
+
+		return
+	}
+
+	sixtapVGo(dst, dOff, dStride, src, sOff, sStride, w, h, f)
+}
+
+func sixtapVGo(dst []byte, dOff, dStride int, src []byte, sOff, sStride, w, h int, f *[6]int16) {
 	for j := range h {
-		row := src[j*w:]
+		row := sOff + j*sStride
+		out := dOff + j*dStride
 
 		for i := range w {
-			p := i + 2*w
+			p := row + i
 
-			v := int32(row[p-2*w])*int32(f[0]) +
-				int32(row[p-w])*int32(f[1]) +
-				int32(row[p])*int32(f[2]) +
-				int32(row[p+w])*int32(f[3]) +
-				int32(row[p+2*w])*int32(f[4]) +
-				int32(row[p+3*w])*int32(f[5]) +
+			v := int32(src[p-2*sStride])*int32(f[0]) +
+				int32(src[p-sStride])*int32(f[1]) +
+				int32(src[p])*int32(f[2]) +
+				int32(src[p+sStride])*int32(f[3]) +
+				int32(src[p+2*sStride])*int32(f[4]) +
+				int32(src[p+3*sStride])*int32(f[5]) +
 				1<<(filterShift-1)
 
-			dst[off+j*stride+i] = clip8(int(v >> filterShift))
+			dst[out+i] = clip8(int(v >> filterShift))
 		}
 	}
 }
 
 func (p *predictor) sixtapPredict(off, x, y, w, h int, dst []byte, dOff, dStride int) {
-	var tmp [(16 + 5) * 16]int32
+	if y == 0 {
+		sixtapH(dst, dOff, dStride, p.src, off, p.stride, w, h, &subPelFilters[x])
 
-	hf := &subPelFilters[x]
-	vf := &subPelFilters[y]
-
-	for j := range h + 5 {
-		filterRow(tmp[j*w:], p.src, off+(j-2)*p.stride, w, hf)
+		return
 	}
 
-	filterCol(dst, dOff, dStride, tmp[:], w, h, vf)
+	if x == 0 {
+		sixtapV(dst, dOff, dStride, p.src, off, p.stride, w, h, &subPelFilters[y])
+
+		return
+	}
+
+	tmp := p.tmp[:]
+
+	sixtapH(tmp, 0, w, p.src, off-2*p.stride, p.stride, w, h+5, &subPelFilters[x])
+	sixtapV(dst, dOff, dStride, tmp, 2*w, w, w, h, &subPelFilters[y])
 }
 
 func bilinearRow(dst []int32, src []byte, off, count int, f *[2]int16) {
@@ -139,8 +175,8 @@ func (d *Decoder) chromaMV(m mv) mv {
 func (d *Decoder) predictInter(mbX, mbY int) {
 	ref := d.reference(d.mb.refFrame)
 
-	luma := predictor{src: ref.y, stride: ref.pic.YStride, sixtap: d.sixtap}
-	chroma := predictor{src: ref.u, stride: ref.pic.UVStride, sixtap: d.sixtap}
+	luma := predictor{src: ref.y, tmp: &d.mcTmp, stride: ref.pic.YStride, sixtap: d.sixtap}
+	chroma := predictor{src: ref.u, tmp: &d.mcTmp, stride: ref.pic.UVStride, sixtap: d.sixtap}
 
 	yBase := ref.yOrigin + mbY*16*luma.stride + mbX*16
 	uvBase := ref.uvOrigin + mbY*8*chroma.stride + mbX*8

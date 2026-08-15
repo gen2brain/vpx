@@ -13,6 +13,9 @@ var (
 
 	transformAsm   func(in []int16, b []byte, off, two int)
 	transformDCAsm func(in []int16, b []byte, off int)
+
+	sixtapHAsm func(dst []byte, dOff, dStride int, src []byte, sOff, sStride, w, h int, f *[6]int16)
+	sixtapVAsm func(dst []byte, dOff, dStride int, src []byte, sOff, sStride, w, h int, f *[6]int16)
 )
 
 func init() {

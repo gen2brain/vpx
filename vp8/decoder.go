@@ -127,8 +127,9 @@ type Decoder struct {
 	intraL     [4]uint8
 	topSamples []topSample
 
-	yuv [yuvSize]uint8
-	pic Picture
+	yuv   [yuvSize]uint8
+	mcTmp [mcScratch]byte
+	pic   Picture
 }
 
 // Release drops the decoder's references to the frame it last decoded, so a

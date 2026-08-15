@@ -1,5 +1,7 @@
 package vp8
 
+import "encoding/binary"
+
 const (
 	bDCPred = iota
 	bTMPred
@@ -35,6 +37,18 @@ func avg3(a, b, c int) uint8 { return uint8((a + 2*b + c + 2) >> 2) }
 
 func fill(b []byte, off, n int, v uint8) {
 	row := b[off : off+n]
+	x := uint64(v) * 0x0101010101010101
+
+	for len(row) >= 8 {
+		binary.LittleEndian.PutUint64(row, x)
+		row = row[8:]
+	}
+
+	if len(row) >= 4 {
+		binary.LittleEndian.PutUint32(row, uint32(x))
+		row = row[4:]
+	}
+
 	for i := range row {
 		row[i] = v
 	}

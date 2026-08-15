@@ -2,6 +2,10 @@
 
 package vp8
 
+var hasAVX2 = cpuidAVX2()
+
+func cpuidAVX2() bool
+
 //go:noescape
 func vFilter16SSE(p *byte, stride, limit, ilevel, hevThresh int)
 
@@ -31,6 +35,18 @@ func transformSSE(in *int16, dst *byte, two int)
 
 //go:noescape
 func transformDCSSE(in *int16, dst *byte)
+
+//go:noescape
+func sixtapHAVX2(dst *byte, dStride int, src *byte, sStride, w, h int, f *int16)
+
+//go:noescape
+func sixtapVAVX2(dst *byte, dStride int, src *byte, sStride, w, h int, f *int16)
+
+//go:noescape
+func sixtapHSSE(dst *byte, dStride int, src *byte, sStride, w, h int, f *int16)
+
+//go:noescape
+func sixtapVSSE(dst *byte, dStride int, src *byte, sStride, w, h int, f *int16)
 
 func dspInit() {
 	vFilter16Asm = func(p []byte, off, stride, limit, ilevel, hevThresh int) {
@@ -71,5 +87,37 @@ func dspInit() {
 
 	transformDCAsm = func(in []int16, b []byte, off int) {
 		transformDCSSE(&in[0], &b[off])
+	}
+
+	sixtapHAsm = func(dst []byte, dOff, dStride int, src []byte, sOff, sStride, w, h int, f *[6]int16) {
+		if sOff < 2 || len(src)-sOff < (h-1)*sStride+w+14 || len(dst)-dOff < (h-1)*dStride+w {
+			sixtapHGo(dst, dOff, dStride, src, sOff, sStride, w, h, f)
+
+			return
+		}
+
+		if hasAVX2 {
+			sixtapHAVX2(&dst[dOff], dStride, &src[sOff], sStride, w, h, &f[0])
+
+			return
+		}
+
+		sixtapHSSE(&dst[dOff], dStride, &src[sOff], sStride, w, h, &f[0])
+	}
+
+	sixtapVAsm = func(dst []byte, dOff, dStride int, src []byte, sOff, sStride, w, h int, f *[6]int16) {
+		if sOff < 2*sStride || len(src)-sOff < (h+2)*sStride+w+8 || len(dst)-dOff < (h-1)*dStride+w {
+			sixtapVGo(dst, dOff, dStride, src, sOff, sStride, w, h, f)
+
+			return
+		}
+
+		if hasAVX2 {
+			sixtapVAVX2(&dst[dOff], dStride, &src[sOff], sStride, w, h, &f[0])
+
+			return
+		}
+
+		sixtapVSSE(&dst[dOff], dStride, &src[sOff], sStride, w, h, &f[0])
 	}
 }

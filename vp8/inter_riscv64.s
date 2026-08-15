@@ -1,0 +1,83 @@
+//go:build riscv64 && riscv64.rva23u64 && !noasm
+
+#include "textflag.h"
+
+// func sixtapRVV(dst *byte, dStride int, src *byte, sStride, step, w, h int, f *int16)
+TEXT ·sixtapRVV(SB), NOSPLIT, $0-64
+	MOV dst+0(FP), X10
+	MOV dStride+8(FP), X11
+	MOV src+16(FP), X12
+	MOV sStride+24(FP), X13
+	MOV step+32(FP), X14
+	MOV w+40(FP), X15
+	MOV h+48(FP), X16
+	MOV f+56(FP), X17
+
+	MOVH  (X17), X18
+	MOVH  2(X17), X19
+	MOVH  4(X17), X20
+	MOVH  6(X17), X21
+	MOVH  8(X17), X22
+	MOVH  10(X17), X23
+
+	MOV $64, X24
+	MOV $255, X25
+
+	ADD X14, X14, X5
+	SUB X5, X12
+
+row:
+	VSETVLI X15, E8, M1, TA, MA, X6
+
+	MOV    X12, X7
+	VLE8V  (X7), V1
+	ADD    X14, X7
+	VLE8V  (X7), V2
+	ADD    X14, X7
+	VLE8V  (X7), V3
+	ADD    X14, X7
+	VLE8V  (X7), V4
+	ADD    X14, X7
+	VLE8V  (X7), V5
+	ADD    X14, X7
+	VLE8V  (X7), V6
+
+	VSETVLI X15, E16, M1, TA, MA, X6
+
+	VZEXTVF2 V1, V18
+	VMULVX   X18, V18, V16
+
+	VZEXTVF2 V2, V18
+	VMULVX   X19, V18, V18
+	VSADDVV  V18, V16, V16
+
+	VZEXTVF2 V5, V18
+	VMULVX   X22, V18, V18
+	VSADDVV  V18, V16, V16
+
+	VZEXTVF2 V6, V18
+	VMULVX   X23, V18, V18
+	VSADDVV  V18, V16, V16
+
+	VZEXTVF2 V3, V18
+	VMULVX   X20, V18, V18
+	VSADDVV  V18, V16, V16
+
+	VZEXTVF2 V4, V18
+	VMULVX   X21, V18, V18
+	VSADDVV  V18, V16, V16
+
+	VSADDVX X24, V16, V16
+	VSRAVI  $7, V16, V16
+	VMAXVX  X0, V16, V16
+	VMINVX  X25, V16, V16
+
+	VSETVLI X15, E8, M1, TA, MA, X6
+	VNSRLWI $0, V16, V1
+	VSE8V   V1, (X10)
+
+	ADD X13, X12
+	ADD X11, X10
+	SUB $1, X16
+	BNE X16, X0, row
+	RET
