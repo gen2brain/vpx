@@ -42,6 +42,9 @@ func sixtapVNEON(dst *byte, dStride int, src *byte, sStride, w, h int, f *int16)
 func sseNEON(a, b *byte, size int) int
 
 //go:noescape
+func trueMotionNEON(b *byte, stride, size int)
+
+//go:noescape
 func fTransformNEON(src, ref *byte, out *int16)
 
 //go:noescape
@@ -86,6 +89,10 @@ func dspInit() {
 
 	transformDCAsm = func(in []int16, b []byte, off int) {
 		transformDCNEON(&in[0], &b[off])
+	}
+
+	trueMotionAsm = func(b []byte, off, size int) {
+		trueMotionNEON(&b[off], bps, size)
 	}
 
 	sseAsm = func(a, b []byte, off, size int) int {

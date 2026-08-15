@@ -61,6 +61,16 @@ func fillBlock(b []byte, off, n int, v uint8) {
 }
 
 func trueMotion(b []byte, off, size int) {
+	if trueMotionAsm != nil && off >= bps+1 && len(b)-off >= (size-1)*bps+size {
+		trueMotionAsm(b, off, size)
+
+		return
+	}
+
+	trueMotionGo(b, off, size)
+}
+
+func trueMotionGo(b []byte, off, size int) {
 	top := off - bps
 	tl := int(b[top-1])
 

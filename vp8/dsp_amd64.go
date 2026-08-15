@@ -52,6 +52,9 @@ func sixtapVSSE(dst *byte, dStride int, src *byte, sStride, w, h int, f *int16)
 func sseSSE(a, b *byte, size int) int
 
 //go:noescape
+func trueMotionSSE(b *byte, stride, size int)
+
+//go:noescape
 func fTransformSSE(src, ref *byte, out *int16)
 
 //go:noescape
@@ -121,6 +124,10 @@ func dspInit() {
 		}
 
 		sixtapHSSE(&dst[dOff], dStride, &src[sOff], sStride, w, h, &f[0])
+	}
+
+	trueMotionAsm = func(b []byte, off, size int) {
+		trueMotionSSE(&b[off], bps, size)
 	}
 
 	sseAsm = func(a, b []byte, off, size int) int {
