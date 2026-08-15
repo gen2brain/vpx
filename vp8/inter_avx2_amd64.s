@@ -137,3 +137,37 @@ hnext2:
 
 	VZEROUPPER
 	RET
+
+// func trueMotionAVX2(b *byte, stride, size int)
+TEXT ·trueMotionAVX2(SB), NOSPLIT, $0-24
+	MOVQ b+0(FP), SI
+	MOVQ stride+8(FP), BX
+	MOVQ size+16(FP), CX
+
+	MOVQ SI, DI
+	SUBQ BX, DI
+
+	MOVBLZX      -1(DI), AX
+	VMOVD        AX, X2
+	VPBROADCASTW X2, Y2
+
+	VPMOVZXBW (DI), Y0
+
+rowtm:
+	MOVBLZX      -1(SI), AX
+	VMOVD        AX, X3
+	VPBROADCASTW X3, Y3
+
+	VPADDW    Y0, Y3, Y3
+	VPSUBW    Y2, Y3, Y3
+	VPACKUSWB Y3, Y3, Y3
+	VPERMQ    $0xd8, Y3, Y3
+
+	VMOVDQU X3, (SI)
+
+	ADDQ BX, SI
+	DECQ CX
+	JNZ  rowtm
+
+	VZEROUPPER
+	RET

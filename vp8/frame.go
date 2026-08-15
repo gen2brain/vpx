@@ -1,5 +1,7 @@
 package vp8
 
+import "encoding/binary"
+
 const (
 	yuvSize = bps*17 + bps*9
 	yOff    = bps + 8
@@ -102,15 +104,19 @@ func (d *Decoder) initRowContext(mbY int) {
 }
 
 func (d *Decoder) rotateLeft() {
-	b := d.yuv[:]
+	b := &d.yuv
 
 	for j := -1; j < 16; j++ {
-		copy(b[yOff+j*bps-4:yOff+j*bps], b[yOff+j*bps+12:yOff+j*bps+16])
+		o := yOff + j*bps
+		binary.LittleEndian.PutUint32(b[o-4:o], binary.LittleEndian.Uint32(b[o+12:o+16]))
 	}
 
 	for j := -1; j < 8; j++ {
-		copy(b[uOff+j*bps-4:uOff+j*bps], b[uOff+j*bps+4:uOff+j*bps+8])
-		copy(b[vOff+j*bps-4:vOff+j*bps], b[vOff+j*bps+4:vOff+j*bps+8])
+		o := uOff + j*bps
+		binary.LittleEndian.PutUint32(b[o-4:o], binary.LittleEndian.Uint32(b[o+4:o+8]))
+
+		o = vOff + j*bps
+		binary.LittleEndian.PutUint32(b[o-4:o], binary.LittleEndian.Uint32(b[o+4:o+8]))
 	}
 }
 
@@ -234,17 +240,22 @@ func (d *Decoder) fillTopRight(mbX, mbY int) {
 }
 
 func (d *Decoder) emit(mbX, mbY int) {
-	b := d.yuv[:]
+	b := &d.yuv
 
-	yOut := mbY*16*d.pic.YStride + mbX*16
+	ys := d.pic.YStride
+	y := d.pic.Y[mbY*16*ys+mbX*16:]
+
 	for j := range 16 {
-		copy(d.pic.Y[yOut+j*d.pic.YStride:yOut+j*d.pic.YStride+16], b[yOff+j*bps:yOff+j*bps+16])
+		copy(y[j*ys:j*ys+16], b[yOff+j*bps:yOff+j*bps+16])
 	}
 
-	uvOut := mbY*8*d.pic.UVStride + mbX*8
+	us := d.pic.UVStride
+	off := mbY*8*us + mbX*8
+	u, v := d.pic.U[off:], d.pic.V[off:]
+
 	for j := range 8 {
-		copy(d.pic.U[uvOut+j*d.pic.UVStride:uvOut+j*d.pic.UVStride+8], b[uOff+j*bps:uOff+j*bps+8])
-		copy(d.pic.V[uvOut+j*d.pic.UVStride:uvOut+j*d.pic.UVStride+8], b[vOff+j*bps:vOff+j*bps+8])
+		copy(u[j*us:j*us+8], b[uOff+j*bps:uOff+j*bps+8])
+		copy(v[j*us:j*us+8], b[vOff+j*bps:vOff+j*bps+8])
 	}
 }
 

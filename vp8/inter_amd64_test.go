@@ -170,6 +170,41 @@ func BenchmarkSixtap(b *testing.B) {
 	}
 }
 
+func TestTrueMotionSSEAndAVX2(t *testing.T) {
+	r := rand.New(rand.NewPCG(31, 32))
+
+	want := make([]byte, yuvSize)
+	sse := make([]byte, yuvSize)
+	avx := make([]byte, yuvSize)
+
+	for iter := range 20000 {
+		for i := range want {
+			want[i] = uint8(r.IntN(256))
+		}
+
+		copy(sse, want)
+		copy(avx, want)
+
+		size := [3]int{4, 8, 16}[r.IntN(3)]
+		off := bps + 1 + r.IntN(len(want)-17*bps-16)
+
+		trueMotionGo(want, off, size)
+		trueMotionSSE(&sse[off], bps, size)
+
+		if !bytes.Equal(want, sse) {
+			t.Fatalf("iter %d: trueMotionSSE size=%d", iter, size)
+		}
+
+		if hasAVX2 && size == 16 {
+			trueMotionAVX2(&avx[off], bps, size)
+
+			if !bytes.Equal(want, avx) {
+				t.Fatalf("iter %d: trueMotionAVX2", iter)
+			}
+		}
+	}
+}
+
 func BenchmarkEncoderKernels(b *testing.B) {
 	a := make([]byte, bps*24)
 	c := make([]byte, bps*24)
@@ -223,6 +258,22 @@ func BenchmarkEncoderKernels(b *testing.B) {
 			fTransformSSE(&a[0], &c[0], &out[0])
 		}
 	})
+
+	tm := make([]byte, yuvSize)
+
+	b.Run("trueMotion16/SSE2", func(b *testing.B) {
+		for b.Loop() {
+			trueMotionSSE(&tm[bps+1], bps, 16)
+		}
+	})
+
+	if hasAVX2 {
+		b.Run("trueMotion16/AVX2", func(b *testing.B) {
+			for b.Loop() {
+				trueMotionAVX2(&tm[bps+1], bps, 16)
+			}
+		})
+	}
 }
 
 func TestFTransform2AVX2MatchesScalar(t *testing.T) {

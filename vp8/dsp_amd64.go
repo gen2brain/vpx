@@ -69,6 +69,9 @@ func quantizeAVX2(in, out *int16, m *qmatrix)
 //go:noescape
 func fTransform2AVX2(src, ref *byte, out *int16)
 
+//go:noescape
+func trueMotionAVX2(b *byte, stride, size int)
+
 func dspInit() {
 	vFilter16Asm = func(p []byte, off, stride, limit, ilevel, hevThresh int) {
 		vFilter16SSE(&p[off], stride, limit, ilevel, hevThresh)
@@ -127,6 +130,12 @@ func dspInit() {
 	}
 
 	trueMotionAsm = func(b []byte, off, size int) {
+		if hasAVX2 && size == 16 {
+			trueMotionAVX2(&b[off], bps, size)
+
+			return
+		}
+
 		trueMotionSSE(&b[off], bps, size)
 	}
 
