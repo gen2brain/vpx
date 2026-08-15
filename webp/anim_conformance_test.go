@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -22,7 +23,17 @@ func animRefBin(t *testing.T) string {
 		t.Skip("set ANIMREF_BIN to a libwebp animation dumper")
 	}
 
-	return name
+	if !filepath.IsAbs(name) && strings.ContainsRune(name, filepath.Separator) {
+		_, self, _, _ := runtime.Caller(0)
+		name = filepath.Join(filepath.Dir(self), "..", name)
+	}
+
+	bin, err := exec.LookPath(name)
+	if err != nil {
+		t.Fatalf("ANIMREF_BIN=%s: %v", os.Getenv("ANIMREF_BIN"), err)
+	}
+
+	return bin
 }
 
 type animRef struct {
