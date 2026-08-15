@@ -10,6 +10,7 @@ import (
 type still struct {
 	vp8      vp8.Decoder
 	lossless losslessDecoder
+	uv       [128]byte
 }
 
 var stillPool sync.Pool
@@ -136,7 +137,7 @@ func decodeLossy(data, alpha []byte, o Options) (image.Image, error) {
 	if o.output() == outRGBA {
 		img := image.NewRGBA(image.Rect(0, 0, pic.Width, pic.Height))
 
-		upsampleFrame(img.Pix, img.Stride, pic)
+		upsampleFrame(img.Pix, img.Stride, pic, &s.uv)
 
 		if err := applyAlphaRGBA(&s.lossless, img, alpha, o.AlphaDither); err != nil {
 			return nil, err

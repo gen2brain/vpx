@@ -117,6 +117,7 @@ type animScratch struct {
 	lossless losslessDecoder
 	rgba     []byte
 	alpha    []byte
+	uv       [128]byte
 }
 
 func (a *animScratch) resize(n int) {
@@ -150,7 +151,7 @@ func (c *container) decodeFrameRGBA(f frame, o Options, a *animScratch) ([]byte,
 			return nil, ErrInvalid
 		}
 
-		upsampleFrame(a.rgba, 4*f.w, pic)
+		upsampleFrame(a.rgba, 4*f.w, pic, &a.uv)
 
 		chunk, err := c.payload(f.alpha)
 		if err != nil {

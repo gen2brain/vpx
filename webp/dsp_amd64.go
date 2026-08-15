@@ -18,6 +18,12 @@ func argbToRGBASSE(dst *byte, px *uint32, n int)
 //go:noescape
 func argbToRGBAAVX2(dst *byte, px *uint32, n int)
 
+//go:noescape
+func upsample16SSE(top, cur, out *byte)
+
+//go:noescape
+func yuvToRGBA32SSE(dst, y, u, v *byte)
+
 func dspInit() {
 	matchLengthAsm = func(a, b []uint32, limit int) int {
 		if hasAVX2 {
@@ -35,5 +41,19 @@ func dspInit() {
 		}
 
 		argbToRGBASSE(&dst[0], &px[0], len(px))
+	}
+
+	upsample16Asm = func(top, cur, out []byte) {
+		_, _ = top[16], cur[16]
+		_ = out[63]
+
+		upsample16SSE(&top[0], &cur[0], &out[0])
+	}
+
+	yuvToRGBA32Asm = func(dst, y, u, v []byte) {
+		_, _ = y[31], u[31]
+		_, _ = v[31], dst[127]
+
+		yuvToRGBA32SSE(&dst[0], &y[0], &u[0], &v[0])
 	}
 }

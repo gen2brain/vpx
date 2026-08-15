@@ -45,7 +45,7 @@ func upsampleRGB(dst []byte, y int, uv uint32) {
 	yuvToRGB(dst, y, int(uv&0xff), int(uv>>16))
 }
 
-func upsamplePair(topY, bottomY, topU, topV, curU, curV, topDst, bottomDst []byte, n int) {
+func upsamplePair(topY, bottomY, topU, topV, curU, curV, topDst, bottomDst []byte, n int, scratch *[128]byte) {
 	last := (n - 1) >> 1
 
 	tlUV := loadUV(topU[0], topV[0])
@@ -57,7 +57,14 @@ func upsamplePair(topY, bottomY, topU, topV, curU, curV, topDst, bottomDst []byt
 		upsampleRGB(bottomDst, int(bottomY[0]), (3*lUV+tlUV+0x00020002)>>2)
 	}
 
-	for x := 1; x <= last; x++ {
+	x := upsampleBlocks(topY, bottomY, topU, topV, curU, curV, topDst, bottomDst, last, scratch)
+
+	if x > 1 {
+		tlUV = loadUV(topU[x-1], topV[x-1])
+		lUV = loadUV(curU[x-1], curV[x-1])
+	}
+
+	for ; x <= last; x++ {
 		tUV := loadUV(topU[x], topV[x])
 		uv := loadUV(curU[x], curV[x])
 
@@ -88,7 +95,29 @@ func upsamplePair(topY, bottomY, topU, topV, curU, curV, topDst, bottomDst []byt
 	}
 }
 
-func upsampleFrame(dst []byte, stride int, pic *vp8.Picture) {
+func upsampleBlocks(topY, bottomY, topU, topV, curU, curV, topDst, bottomDst []byte, last int, scratch *[128]byte) int {
+	if upsample16Asm == nil || last < 16 {
+		return 1
+	}
+
+	u, v := scratch[:64], scratch[64:]
+
+	x := 1
+	for ; x+15 <= last; x += 16 {
+		upsample16Asm(topU[x-1:], curU[x-1:], u)
+		upsample16Asm(topV[x-1:], curV[x-1:], v)
+
+		yuvToRGBA32Asm(topDst[(2*x-1)*4:], topY[2*x-1:], u[:32], v[:32])
+
+		if bottomY != nil {
+			yuvToRGBA32Asm(bottomDst[(2*x-1)*4:], bottomY[2*x-1:], u[32:], v[32:])
+		}
+	}
+
+	return x
+}
+
+func upsampleFrame(dst []byte, stride int, pic *vp8.Picture, scratch *[128]byte) {
 	w, h := pic.Width, pic.Height
 
 	row := func(i int) []byte { return dst[i*stride:] }
@@ -96,17 +125,17 @@ func upsampleFrame(dst []byte, stride int, pic *vp8.Picture) {
 	uRow := func(i int) []byte { return pic.U[i*pic.UVStride:] }
 	vRow := func(i int) []byte { return pic.V[i*pic.UVStride:] }
 
-	upsamplePair(yRow(0), nil, uRow(0), vRow(0), uRow(0), vRow(0), row(0), nil, w)
+	upsamplePair(yRow(0), nil, uRow(0), vRow(0), uRow(0), vRow(0), row(0), nil, w, scratch)
 
 	for y := 0; y+2 < h; y += 2 {
 		k := y / 2
 		upsamplePair(yRow(y+1), yRow(y+2), uRow(k), vRow(k), uRow(k+1), vRow(k+1),
-			row(y+1), row(y+2), w)
+			row(y+1), row(y+2), w, scratch)
 	}
 
 	if h&1 == 0 && h > 1 {
 		k := (h - 1) / 2
-		upsamplePair(yRow(h-1), nil, uRow(k), vRow(k), uRow(k), vRow(k), row(h-1), nil, w)
+		upsamplePair(yRow(h-1), nil, uRow(k), vRow(k), uRow(k), vRow(k), row(h-1), nil, w, scratch)
 	}
 }
 

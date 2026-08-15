@@ -1,0 +1,134 @@
+//go:build arm64 && !noasm
+
+#include "textflag.h"
+
+#define URHADD(m, n, d)  WORD $(0x6E201400 | ((m) << 16) | ((n) << 5) | (d))
+#define SQDMULH(m, n, d) WORD $(0x4E60B400 | ((m) << 16) | ((n) << 5) | (d))
+#define SQADDH(m, n, d)  WORD $(0x4E600C00 | ((m) << 16) | ((n) << 5) | (d))
+#define SQSUBH(m, n, d)  WORD $(0x4E602C00 | ((m) << 16) | ((n) << 5) | (d))
+#define SQSHRUN6(n, d)   WORD $(0x2F0A8400 | ((n) << 5) | (d))
+
+#define BCAST16(name, off, val)   \
+	DATA name+off(SB)/8, $val; \
+	DATA name+(off+8)(SB)/8, $val
+
+BCAST16(yuvNeon<>, 0, 0x4a854a854a854a85)
+BCAST16(yuvNeon<>, 16, 0x6625662566256625)
+BCAST16(yuvNeon<>, 32, 0x1913191319131913)
+BCAST16(yuvNeon<>, 48, 0x3408340834083408)
+BCAST16(yuvNeon<>, 64, 0x011a011a011a011a)
+BCAST16(yuvNeon<>, 80, 0xc866c866c866c866)
+BCAST16(yuvNeon<>, 96, 0x2204220422042204)
+BCAST16(yuvNeon<>, 112, 0xbaebbaebbaebbaeb)
+GLOBL yuvNeon<>(SB), RODATA|NOPTR, $128
+
+// func upsample16NEON(top, cur, out *byte)
+TEXT ·upsample16NEON(SB), NOSPLIT, $0-24
+	MOVD top+0(FP), R0
+	MOVD cur+8(FP), R1
+	MOVD out+16(FP), R2
+
+	ADD $1, R0, R3
+	ADD $1, R1, R4
+
+	VLD1 (R0), [V0.B16]
+	VLD1 (R3), [V1.B16]
+	VLD1 (R1), [V2.B16]
+	VLD1 (R4), [V3.B16]
+
+	VUXTL   V0.B8, V4.H8
+	VUADDW  V3.B8, V4.H8, V4.H8
+	VUXTL2  V0.B16, V5.H8
+	VUADDW2 V3.B16, V5.H8, V5.H8
+
+	VUXTL   V1.B8, V6.H8
+	VUADDW  V2.B8, V6.H8, V6.H8
+	VUXTL2  V1.B16, V7.H8
+	VUADDW2 V2.B16, V7.H8, V7.H8
+
+	VADD V6.H8, V4.H8, V8.H8
+	VADD V7.H8, V5.H8, V9.H8
+
+	VSHL  $1, V4.H8, V10.H8
+	VADD  V10.H8, V8.H8, V10.H8
+	VSHL  $1, V5.H8, V11.H8
+	VADD  V11.H8, V9.H8, V11.H8
+	VUSHR $3, V10.H8, V10.H8
+	VUSHR $3, V11.H8, V11.H8
+	VUZP1 V11.B16, V10.B16, V12.B16
+
+	VSHL  $1, V6.H8, V13.H8
+	VADD  V13.H8, V8.H8, V13.H8
+	VSHL  $1, V7.H8, V14.H8
+	VADD  V14.H8, V9.H8, V14.H8
+	VUSHR $3, V13.H8, V13.H8
+	VUSHR $3, V14.H8, V14.H8
+	VUZP1 V14.B16, V13.B16, V15.B16
+
+	URHADD(15, 0, 16)
+	URHADD(12, 1, 17)
+	URHADD(12, 2, 18)
+	URHADD(15, 3, 19)
+
+	VZIP1 V17.B16, V16.B16, V20.B16
+	VZIP2 V17.B16, V16.B16, V21.B16
+	VST1  [V20.B16, V21.B16], (R2)
+
+	ADD   $32, R2, R5
+	VZIP1 V19.B16, V18.B16, V22.B16
+	VZIP2 V19.B16, V18.B16, V23.B16
+	VST1  [V22.B16, V23.B16], (R5)
+
+	RET
+
+// func yuvToRGBA32NEON(dst, y, u, v *byte)
+TEXT ·yuvToRGBA32NEON(SB), NOSPLIT, $0-32
+	MOVD dst+0(FP), R0
+	MOVD y+8(FP), R1
+	MOVD u+16(FP), R2
+	MOVD v+24(FP), R3
+
+	MOVD   $yuvNeon<>(SB), R4
+	VLD1.P 64(R4), [V24.B16, V25.B16, V26.B16, V27.B16]
+	VLD1   (R4), [V28.B16, V29.B16, V30.B16, V31.B16]
+
+	MOVD $4, R5
+
+loop:
+	VLD1.P 8(R1), [V0.B8]
+	VLD1.P 8(R2), [V1.B8]
+	VLD1.P 8(R3), [V2.B8]
+
+	VUSHLL $7, V0.B8, V3.H8
+	VUSHLL $7, V1.B8, V4.H8
+	VUSHLL $7, V2.B8, V5.H8
+
+	SQDMULH(24, 3, 6)
+	SQDMULH(25, 5, 7)
+	SQDMULH(26, 4, 8)
+	SQDMULH(27, 5, 9)
+	SQDMULH(28, 4, 10)
+
+	SQADDH(29, 6, 11)
+	SQADDH(30, 6, 12)
+	SQADDH(31, 6, 13)
+
+	SQADDH(7, 11, 11)
+	SQADDH(9, 8, 8)
+	SQADDH(10, 13, 13)
+	SQSUBH(8, 12, 12)
+	SQADDH(4, 13, 13)
+
+	VLD4 (R0), [V16.B8, V17.B8, V18.B8, V19.B8]
+
+	SQSHRUN6(11, 16)
+	SQSHRUN6(12, 17)
+	SQSHRUN6(13, 18)
+
+	VST4 [V16.B8, V17.B8, V18.B8, V19.B8], (R0)
+
+	ADD  $32, R0
+	SUB  $1, R5
+	CBNZ R5, loop
+
+	RET
