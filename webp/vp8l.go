@@ -533,7 +533,14 @@ func (d *losslessDecoder) decodeImageData(width, height int, info *huffmanInfo, 
 
 	var group *huffGroup
 
+	cache := info.cache
 	nextBlock := 0
+	x, y := 0, 0
+
+	if info.bits == 0 {
+		group = &info.groups[0]
+		nextBlock = n
+	}
 
 	for i < n {
 		d.br.fill()
@@ -543,7 +550,6 @@ func (d *losslessDecoder) decodeImageData(width, height int, info *huffmanInfo, 
 		}
 
 		if i >= nextBlock {
-			x, y := i%width, i/width
 			nextBlock = min(x|info.mask, width-1) + y*width + 1
 			group = &info.groups[info.index(x, y)]
 		}
@@ -565,8 +571,13 @@ func (d *losslessDecoder) decodeImageData(width, height int, info *huffmanInfo, 
 			px[i] = argb
 			i++
 
-			if info.cache != nil {
-				info.cache.insert(argb)
+			x++
+			if x == width {
+				x, y = 0, y+1
+			}
+
+			if cache != nil {
+				cache.insert(argb)
 			}
 		case int(code) < numLiteralCodes+numLengthCodes:
 			length := prefixValue(&d.br, int(code)-numLiteralCodes)
@@ -578,29 +589,51 @@ func (d *losslessDecoder) decodeImageData(width, height int, info *huffmanInfo, 
 				return ErrInvalid
 			}
 
-			for k := range length {
-				px[i+k] = px[i-dist+k]
+			dst := px[i : i+length]
+
+			if dist >= length {
+				copy(dst, px[i-dist:])
+			} else {
+				copy(dst, px[i-dist:i])
+
+				for k := dist; k < length; k *= 2 {
+					copy(dst[k:], dst[:min(k, length-k)])
+				}
 			}
 
-			if info.cache != nil {
-				for k := range length {
-					info.cache.insert(px[i+k])
+			if cache != nil {
+				shift := 32 - cache.bits
+				data := cache.data
+
+				for _, v := range dst {
+					data[v*0x1e35a7bd>>shift] = v
 				}
 			}
 
 			i += length
+
+			x += length
+			if x >= width {
+				y += x / width
+				x %= width
+			}
 		default:
-			if info.cache == nil {
+			if cache == nil {
 				return ErrInvalid
 			}
 
 			key := int(code) - numLiteralCodes - numLengthCodes
-			if key >= len(info.cache.data) {
+			if key >= len(cache.data) {
 				return ErrInvalid
 			}
 
-			px[i] = info.cache.data[key]
+			px[i] = cache.data[key]
 			i++
+
+			x++
+			if x == width {
+				x, y = 0, y+1
+			}
 		}
 	}
 
