@@ -96,6 +96,11 @@ type Decoder struct {
 	// DefaultFrameSizeLimit.
 	SizeLimit int
 
+	// Threads bounds the goroutines decoding one frame. Zero means GOMAXPROCS,
+	// one decodes serially. A frame is decoded as an entropy, a prediction and
+	// a loop filter stage running concurrently, so nothing above three helps.
+	Threads int
+
 	frames    [numFrameBuffers]frameBuffer
 	refCnt    [numFrameBuffers]int
 	lastIdx   int
@@ -127,6 +132,7 @@ type Decoder struct {
 	intraL     [4]uint8
 	topSamples []topSample
 
+	pipe  *pipeline
 	yuv   [yuvSize]uint8
 	mcTmp [mcScratch]byte
 	pic   Picture

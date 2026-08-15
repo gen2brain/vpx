@@ -185,9 +185,8 @@ func (d *Decoder) nearMVs(mbX, mbY int, ref uint8) (nearest, near, best mv, cnt 
 	return b.clamp(found[1]), b.clamp(found[2]), b.clamp(best), cnt
 }
 
-func (d *Decoder) parseInterModes(mbX, mbY int) {
+func (d *Decoder) parseInterModes(mb *mbData, mbX, mbY int) {
 	m := d.modeAt(mbX, mbY)
-	mb := &d.mb
 
 	*m = modeInfo{}
 	mb.needClamp = false
@@ -204,7 +203,7 @@ func (d *Decoder) parseInterModes(mbX, mbY int) {
 	}
 
 	if d.br.getBit(d.probIntra) == 0 {
-		d.parseIntraInInter()
+		d.parseIntraInInter(mb)
 
 		mb.refFrame = refIntra
 
@@ -267,8 +266,7 @@ func (d *Decoder) parseInterModes(mbX, mbY int) {
 	}
 }
 
-func (d *Decoder) parseIntraInInter() {
-	mb := &d.mb
+func (d *Decoder) parseIntraInInter(mb *mbData) {
 
 	mode := uint8(d.br.readTree(yModeTree[:], d.yProbs[:]))
 

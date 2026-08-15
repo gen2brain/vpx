@@ -130,8 +130,7 @@ func nzCodeBits(nz uint32, n int, dcNZ bool) uint32 {
 	return nz
 }
 
-func (d *Decoder) parseResiduals(br *boolDec, mbX int) bool {
-	m := &d.mb
+func (d *Decoder) parseResiduals(m *mbData, br *boolDec, mbX int) bool {
 	q := &d.dqm[m.segment]
 
 	top := &d.mbCtx[1+mbX]
@@ -240,13 +239,12 @@ func (d *Decoder) parseResiduals(br *boolDec, mbX int) bool {
 	return nonZeroY|nonZeroUV == 0
 }
 
-func (d *Decoder) decodeMB(br *boolDec, mbX int) bool {
-	m := &d.mb
+func (d *Decoder) decodeMB(m *mbData, br *boolDec, mbX int) bool {
 
 	skip := d.useSkipProb && m.skip
 
 	if !skip {
-		skip = d.parseResiduals(br, mbX)
+		skip = d.parseResiduals(m, br, mbX)
 	} else {
 		top := &d.mbCtx[1+mbX]
 		left := &d.mbCtx[0]

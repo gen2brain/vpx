@@ -642,7 +642,7 @@ func (e *Encoder) Encode(src *Picture, o EncodeOptions) ([]byte, error) {
 			e.loadSource(mbX, mbY)
 			e.rec.loadNeighbours(mbX, mbY)
 			e.codeMB(mbX, mbY)
-			e.rec.reconstructMB(mbX, mbY)
+			e.rec.reconstructMB(&e.rec.mb, mbX, mbY)
 		}
 	}
 

@@ -521,8 +521,8 @@ func (d *Decoder) setFilterInfo(info *fInfo, level int) {
 	}
 }
 
-func (d *Decoder) filterMB(mbX, mbY int) {
-	flags := d.fInfoRow[mbX]
+func (d *Decoder) filterMB(fl []uint8, mbX, mbY int) {
+	flags := fl[mbX]
 
 	f := d.fStrengths[flags&3][flags>>4&3][flags>>2&3]
 	if f.limit == 0 {
@@ -578,8 +578,8 @@ func (d *Decoder) filterMB(mbX, mbY int) {
 	}
 }
 
-func (d *Decoder) filterRow(mbY int) {
+func (d *Decoder) filterRow(flags []uint8, mbY int) {
 	for mbX := range d.mbW {
-		d.filterMB(mbX, mbY)
+		d.filterMB(flags, mbX, mbY)
 	}
 }

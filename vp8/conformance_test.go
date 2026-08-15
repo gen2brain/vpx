@@ -686,13 +686,27 @@ func BenchmarkDecodeVideo(b *testing.B) {
 	b.SetBytes(int64(len(data)))
 	b.ReportAllocs()
 
-	for b.Loop() {
-		var d Decoder
-
-		for _, frame := range frames {
-			if _, err := d.DecodeFrame(frame); err != nil {
-				b.Fatal(err)
-			}
+	for _, n := range []int{1, 0} {
+		name := "threaded"
+		if n == 1 {
+			name = "serial"
 		}
+
+		b.Run(name, func(b *testing.B) {
+			b.SetBytes(int64(len(data)))
+			b.ReportAllocs()
+
+			for b.Loop() {
+				var d Decoder
+
+				d.Threads = n
+
+				for _, frame := range frames {
+					if _, err := d.DecodeFrame(frame); err != nil {
+						b.Fatal(err)
+					}
+				}
+			}
+		})
 	}
 }

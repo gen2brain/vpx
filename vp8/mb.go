@@ -97,8 +97,7 @@ func parseBMode(d *boolDec, p *[numBModes - 1]uint8) uint8 {
 	return bHUPred
 }
 
-func (d *Decoder) parseIntraMode(mbX, mbY int) {
-	m := &d.mb
+func (d *Decoder) parseIntraMode(m *mbData, mbX, mbY int) {
 	top := d.intraT[4*mbX : 4*mbX+4 : 4*mbX+4]
 	left := &d.intraL
 

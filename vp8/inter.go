@@ -172,8 +172,8 @@ func (d *Decoder) chromaMV(m mv) mv {
 	}
 }
 
-func (d *Decoder) predictInter(mbX, mbY int) {
-	ref := d.reference(d.mb.refFrame)
+func (d *Decoder) predictInter(m *mbData, mbX, mbY int) {
+	ref := d.reference(m.refFrame)
 
 	luma := predictor{src: ref.y, tmp: &d.mcTmp, stride: ref.pic.YStride, sixtap: d.sixtap}
 	chroma := predictor{src: ref.u, tmp: &d.mcTmp, stride: ref.pic.UVStride, sixtap: d.sixtap}
@@ -181,8 +181,8 @@ func (d *Decoder) predictInter(mbX, mbY int) {
 	yBase := ref.yOrigin + mbY*16*luma.stride + mbX*16
 	uvBase := ref.uvOrigin + mbY*8*chroma.stride + mbX*8
 
-	if d.mb.mode == mvSplit {
-		d.predictSplit(mbX, mbY, ref, luma, chroma, yBase, uvBase)
+	if m.mode == mvSplit {
+		d.predictSplit(m, mbX, mbY, ref, luma, chroma, yBase, uvBase)
 
 		return
 	}
@@ -190,7 +190,7 @@ func (d *Decoder) predictInter(mbX, mbY int) {
 	b := d.mbBounds(mbX, mbY)
 
 	v := d.modeAt(mbX, mbY).mv
-	if d.mb.needClamp {
+	if m.needClamp {
 		v = b.clampToBorder(v, 0)
 	}
 
@@ -212,13 +212,13 @@ func (d *Decoder) predictInter(mbX, mbY int) {
 	vplane.predict(off, int(c.col&7), int(c.row&7), 8, 8, d.yuv[:], vOff, bps)
 }
 
-func (d *Decoder) predictSplit(mbX, mbY int, ref *frameBuffer, luma, chroma predictor, yBase, uvBase int) {
+func (d *Decoder) predictSplit(mb *mbData, mbX, mbY int, ref *frameBuffer, luma, chroma predictor, yBase, uvBase int) {
 	m := d.modeAt(mbX, mbY)
 	b := d.mbBounds(mbX, mbY)
 
 	for i := range 16 {
 		v := m.subMV[i]
-		if d.mb.needClamp {
+		if mb.needClamp {
 			v = b.clampToBorder(v, 0)
 		}
 
@@ -241,7 +241,7 @@ func (d *Decoder) predictSplit(mbX, mbY int, ref *frameBuffer, luma, chroma pred
 
 		c := mv{row: average4(sumRow, d.fullPixel), col: average4(sumCol, d.fullPixel)}
 
-		if d.mb.needClamp {
+		if mb.needClamp {
 			c = b.clampToBorder(c, 1)
 		}
 

@@ -162,21 +162,20 @@ func (d *Decoder) loadNeighbours(mbX, mbY int) {
 	copy(b[vOff-bps:vOff-bps+8], top.v[:])
 }
 
-func (d *Decoder) reconstruct(mbX, mbY int) {
+func (d *Decoder) reconstruct(m *mbData, mbX, mbY int) {
 	d.loadNeighbours(mbX, mbY)
-	d.reconstructMB(mbX, mbY)
+	d.reconstructMB(m, mbX, mbY)
 }
 
-func (d *Decoder) reconstructMB(mbX, mbY int) {
+func (d *Decoder) reconstructMB(m *mbData, mbX, mbY int) {
 	b := d.yuv[:]
-	m := &d.mb
 
 	top := &d.topSamples[mbX]
 
 	bits := m.nonZeroY
 
 	if m.inter() {
-		d.predictInter(mbX, mbY)
+		d.predictInter(m, mbX, mbY)
 
 		if bits != 0 {
 			for n := range 16 {
@@ -260,6 +259,10 @@ func (d *Decoder) emit(mbX, mbY int) {
 }
 
 func (d *Decoder) decodeFrame() error {
+	if d.pipelined() {
+		return d.decodeFramePipelined()
+	}
+
 	for mbY := range d.mbH {
 		br := &d.parts[mbY&(d.numParts-1)]
 
@@ -267,21 +270,23 @@ func (d *Decoder) decodeFrame() error {
 		d.initRowContext(mbY)
 
 		for mbX := range d.mbW {
+			m := &d.mb
+
 			if d.hdr.KeyFrame {
-				d.parseIntraMode(mbX, mbY)
+				d.parseIntraMode(m, mbX, mbY)
 			} else {
-				d.parseInterModes(mbX, mbY)
+				d.parseInterModes(m, mbX, mbY)
 			}
 
-			if !d.decodeMB(br, mbX) {
+			if !d.decodeMB(m, br, mbX) {
 				return ErrInvalid
 			}
 
 			if d.filterType > 0 {
-				d.fInfoRow[mbX] = d.mb.filterFlags()
+				d.fInfoRow[mbX] = m.filterFlags()
 			}
 
-			d.reconstruct(mbX, mbY)
+			d.reconstruct(m, mbX, mbY)
 		}
 
 		if d.br.eof {
@@ -289,7 +294,7 @@ func (d *Decoder) decodeFrame() error {
 		}
 
 		if d.filterType > 0 {
-			d.filterRow(mbY)
+			d.filterRow(d.fInfoRow, mbY)
 		}
 	}
 
