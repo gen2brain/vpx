@@ -68,6 +68,7 @@ type Encoder struct {
 	topB      []uint8
 	leftB     [4]uint8
 	tryI4     bool
+	rdUV      bool
 	tokens    tokenBuf
 	probaNew  [numSlots]uint8
 	probaFlat [numSlots]uint8
@@ -75,6 +76,7 @@ type Encoder struct {
 	i4Coeffs  [16]int16
 	rdI16     bool
 	saved     i16State
+	savedUV   uvState
 	threads   int
 	dc        [16]int16
 }
@@ -93,6 +95,7 @@ func qualityToQuant(quality int) int {
 func (e *Encoder) setup(o EncodeOptions) {
 	e.threads = o.Threads
 	e.tryI4 = o.Method >= 3
+	e.rdUV = o.Method >= 5
 	e.rdI16 = o.Method >= 5
 	e.baseQ = qualityToQuant(o.Quality)
 
@@ -227,31 +230,78 @@ func (e *Encoder) pickLumaMode(mbX, mbY int) uint8 {
 	return uint8(best)
 }
 
-func (e *Encoder) pickChromaMode(mbX, mbY int) uint8 {
+func (e *Encoder) pickChromaMode(mbX, mbY int, m *mbData, lv *mbLevels) (uint8, uint32) {
 	b := e.rec.yuv[:]
 
 	best, bestScore := 0, math.MaxInt
 
-	for mode := range 4 {
-		m := checkMode(mbX, mbY, mode)
+	if !e.rdUV {
+		for mode := range 4 {
+			k := checkMode(mbX, mbY, mode)
 
-		predChroma8[m](b, uOff)
-		predChroma8[m](b, vOff)
+			predChroma8[k](b, uOff)
+			predChroma8[k](b, vOff)
+
+			score := 256*(sse(e.sc[:], b, uOff, 8)+sse(e.sc[:], b, vOff, 8)) +
+				e.lambdaUV*fixedCostsUV[mode]
+
+			if score < bestScore {
+				best, bestScore = mode, score
+			}
+		}
+
+		k := checkMode(mbX, mbY, best)
+
+		predChroma8[k](b, uOff)
+		predChroma8[k](b, vOff)
+
+		return uint8(best), e.transformChroma(m, lv)
+	}
+
+	for mode := range 4 {
+		k := checkMode(mbX, mbY, mode)
+
+		predChroma8[k](b, uOff)
+		predChroma8[k](b, vOff)
+
+		bits := e.transformChroma(m, lv)
+
+		doUVTransform(bits, m.coeffs[16*16:], b, uOff)
+		doUVTransform(bits>>8, m.coeffs[20*16:], b, vOff)
 
 		score := 256*(sse(e.sc[:], b, uOff, 8)+sse(e.sc[:], b, vOff, 8)) +
 			e.lambdaUV*fixedCostsUV[mode]
 
+		var nz [2][2]int
+
+		for p := range 2 {
+			for i := range 4 {
+				x, y := i&1, i>>1
+
+				ctx := 0
+				if x > 0 {
+					ctx += nz[y][0]
+				}
+
+				if y > 0 {
+					ctx += nz[0][x]
+				}
+
+				n := 16 + 4*p + i
+				score += e.lambdaUV * coeffCost(&e.proba.bandsPtr[2], ctx, 0, lv.levels[n][:], lv.nz[n])
+
+				nz[y][x] = b2i(lv.nz[n] > 0)
+			}
+		}
+
 		if score < bestScore {
 			best, bestScore = mode, score
+
+			e.savedUV.store(m, lv, bits)
 		}
 	}
 
-	m := checkMode(mbX, mbY, best)
-
-	predChroma8[m](b, uOff)
-	predChroma8[m](b, vOff)
-
-	return uint8(best)
+	return uint8(best), e.savedUV.restore(m, lv)
 }
 
 func (e *Encoder) transformLuma(m *mbData, lv *mbLevels) uint32 {
@@ -350,8 +400,7 @@ func (e *Encoder) analyzeMB(mbX, mbY int, lv *mbLevels) {
 		}
 	}
 
-	m.uvMode = e.pickChromaMode(mbX, mbY)
-	m.nonZeroUV = e.transformChroma(m, lv)
+	m.uvMode, m.nonZeroUV = e.pickChromaMode(mbX, mbY, m, lv)
 
 	skip := m.nonZeroY|m.nonZeroUV == 0 && lv.nz[y2Block] == 0
 
@@ -364,6 +413,29 @@ func (e *Encoder) analyzeMB(mbX, mbY int, lv *mbLevels) {
 	}
 
 	e.info[mbY*e.mbW+mbX] = info
+}
+
+type uvState struct {
+	coeffs [128]int16
+	levels [8][16]int16
+	nz     [8]int
+	bits   uint32
+}
+
+func (s *uvState) store(m *mbData, lv *mbLevels, bits uint32) {
+	copy(s.coeffs[:], m.coeffs[16*16:])
+	copy(s.levels[:], lv.levels[16:])
+	copy(s.nz[:], lv.nz[16:])
+
+	s.bits = bits
+}
+
+func (s *uvState) restore(m *mbData, lv *mbLevels) uint32 {
+	copy(m.coeffs[16*16:], s.coeffs[:])
+	copy(lv.levels[16:], s.levels[:])
+	copy(lv.nz[16:], s.nz[:])
+
+	return s.bits
 }
 
 type i16State struct {
