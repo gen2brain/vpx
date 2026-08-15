@@ -141,6 +141,8 @@ func (c *container) decodeFrameRGBA(f frame, o Options, a *animScratch) ([]byte,
 
 	switch string(f.image.id[:]) {
 	case fccVP8:
+		a.vp8.Threads = o.Threads
+
 		pic, err := a.vp8.DecodeFrame(data)
 		if err != nil {
 			return nil, err

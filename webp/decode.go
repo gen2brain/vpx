@@ -129,6 +129,8 @@ func decodeLossy(data, alpha []byte, o Options) (image.Image, error) {
 	s := getStill()
 	defer putStill(s)
 
+	s.vp8.Threads = o.Threads
+
 	pic, err := s.vp8.DecodeFrame(data)
 	if err != nil {
 		return nil, err

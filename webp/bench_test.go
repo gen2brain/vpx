@@ -64,13 +64,22 @@ func benchLarge(b *testing.B, opts Options) []byte {
 func BenchmarkDecodeLarge(b *testing.B) {
 	data := benchLarge(b, Options{Quality: 75})
 
-	b.SetBytes(int64(len(data)))
-	b.ReportAllocs()
-
-	for b.Loop() {
-		if _, err := Decode(bytes.NewReader(data)); err != nil {
-			b.Fatal(err)
+	for _, n := range []int{1, 0} {
+		name := "threaded"
+		if n == 1 {
+			name = "serial"
 		}
+
+		b.Run(name, func(b *testing.B) {
+			b.SetBytes(int64(len(data)))
+			b.ReportAllocs()
+
+			for b.Loop() {
+				if _, err := Decode(bytes.NewReader(data), Options{Threads: n}); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
 	}
 }
 

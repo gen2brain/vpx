@@ -61,6 +61,10 @@ type Options struct {
 	// converting a lossless one to YUV 4:2:0. That conversion is lossy, and is
 	// what libwebp's MODE_YUVA does.
 	ToYCbCr bool
+	// Threads bounds the goroutines decoding one lossy frame. Zero means
+	// GOMAXPROCS, one decodes serially. A lossless image is one bitstream and
+	// ignores it.
+	Threads int
 }
 
 type features struct {

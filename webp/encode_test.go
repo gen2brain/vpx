@@ -777,6 +777,10 @@ func TestEncodeAnimationAgainstLibwebp(t *testing.T) {
 }
 
 func TestEncodeAllocs(t *testing.T) {
+	if raceEnabled {
+		t.Skip("the race detector allocates")
+	}
+
 	imgs := testImages()
 
 	anim := &WEBP{

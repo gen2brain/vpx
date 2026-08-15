@@ -534,6 +534,10 @@ func readFileBytes(name string) ([]byte, error) {
 // the decode path exist to keep down. The bounds are ceilings, not exact
 // counts: raise one only with a reason.
 func TestDecodeAllocs(t *testing.T) {
+	if raceEnabled {
+		t.Skip("the race detector allocates")
+	}
+
 	tests := []struct {
 		file string
 		max  float64
@@ -656,9 +660,15 @@ func hashImage(h io.Writer, img image.Image) {
 }
 
 func goldenHash(data []byte) string {
+	return goldenHashThreads(data, 0)
+}
+
+func goldenHashThreads(data []byte, threads int) string {
 	h := sha256.New()
 
 	for _, o := range []Options{{}, {ToRGBA: true}, {ToYCbCr: true}} {
+		o.Threads = threads
+
 		img, err := Decode(bytes.NewReader(data), o)
 		if err != nil {
 			fmt.Fprintf(h, "decode %v ", err)
@@ -669,7 +679,7 @@ func goldenHash(data []byte) string {
 		hashImage(h, img)
 	}
 
-	all, err := DecodeAll(bytes.NewReader(data))
+	all, err := DecodeAll(bytes.NewReader(data), Options{Threads: threads})
 	if err != nil {
 		fmt.Fprintf(h, "all %v ", err)
 
@@ -796,4 +806,40 @@ func TestGoldenCorpus(t *testing.T) {
 			t.Errorf("golden mismatch:\n got %s\nwant %s", gotLines[i], wantLines[i])
 		}
 	}
+}
+
+// TestThreadsMatchSerial requires every thread count to decode to the same
+// bytes as Threads: 1, over the bundled files and the corpus when it is set.
+func TestThreadsMatchSerial(t *testing.T) {
+	files, err := filepath.Glob(filepath.Join("testdata", "*.webp"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if dir := os.Getenv("CONFORMANCE_DIR"); dir != "" {
+		filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+			if err == nil && !d.IsDir() && strings.EqualFold(filepath.Ext(path), ".webp") {
+				files = append(files, path)
+			}
+
+			return nil
+		})
+	}
+
+	for _, path := range files {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		want := goldenHashThreads(data, 1)
+
+		for _, n := range []int{0, 2, 3, 4, 16} {
+			if got := goldenHashThreads(data, n); got != want {
+				t.Fatalf("%s: Threads %d gives %s, serial gives %s", filepath.Base(path), n, got, want)
+			}
+		}
+	}
+
+	t.Logf("%d files decode identically at every thread count", len(files))
 }
