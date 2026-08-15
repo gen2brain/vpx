@@ -48,6 +48,8 @@ jobs:
         include:
         - pkg: ./vp8/
           target: FuzzDecodeFrame
+        - pkg: ./vp8/
+          target: FuzzKernels
         - pkg: ./webp/
           target: FuzzDecode
         - pkg: ./webp/
