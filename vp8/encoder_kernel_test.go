@@ -59,3 +59,61 @@ func TestFTransformKernelMatchesScalar(t *testing.T) {
 		}
 	}
 }
+
+func TestQuantizeKernelMatchesScalar(t *testing.T) {
+	if quantizeAsm == nil {
+		t.Skip("no kernel compiled in")
+	}
+
+	r := rand.New(rand.NewPCG(19, 20))
+
+	var m qmatrix
+
+	for iter := range 20000 {
+		saturate := iter%4 == 0
+
+		for i := range 2 {
+			m.q[i] = uint32(4 + r.IntN(300))
+
+			if saturate {
+				m.q[i] = 4
+			}
+		}
+
+		m.expand(r.IntN(3))
+
+		if !m.narrow {
+			t.Fatalf("iter %d: matrix not narrow for q %v", iter, m.q[:2])
+		}
+
+		var inA, inB, outA, outB [16]int16
+
+		for i := range inA {
+			inA[i] = int16(r.IntN(1<<14) - 1<<13)
+
+			if saturate {
+				inA[i] = int16(8000 + r.IntN(1000))
+
+				if r.IntN(2) == 0 {
+					inA[i] = -inA[i]
+				}
+			}
+		}
+
+		inB = inA
+		first := r.IntN(2)
+
+		wantN := quantizeBlockGo(inA[:], outA[:], &m, first)
+		gotN := quantizeBlock(inB[:], outB[:], &m, first)
+
+		if wantN != gotN || inA != inB {
+			t.Fatalf("iter %d: n = %d, want %d; in = %v, want %v", iter, gotN, wantN, inB, inA)
+		}
+
+		for n := first; n < 16; n++ {
+			if outA[n] != outB[n] {
+				t.Fatalf("iter %d: out[%d] = %d, want %d", iter, n, outB[n], outA[n])
+			}
+		}
+	}
+}

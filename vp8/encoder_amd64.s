@@ -229,3 +229,51 @@ TEXT ·fTransformSSE(SB), NOSPLIT, $0-24
 	MOVOU X9, (DX)
 	MOVOU X11, 16(DX)
 	RET
+
+DATA qk2047<>+0(SB)/8, $0x07ff07ff07ff07ff
+DATA qk2047<>+8(SB)/8, $0x07ff07ff07ff07ff
+GLOBL qk2047<>(SB), RODATA|NOPTR, $16
+
+#define QHALF(inoff, moff, bias0, bias1) \
+	MOVOU     inoff(SI), X0      \
+	PXOR      X1, X1             \
+	PCMPGTW   X0, X1             \
+	PXOR      X1, X0             \
+	PSUBW     X1, X0             \
+	MOVOU     384+moff(DX), X6   \
+	PADDW     X6, X0             \
+	MOVOU     352+moff(DX), X6   \
+	MOVOU     X0, X2             \
+	PMULHUW   X6, X0             \
+	PMULLW    X6, X2             \
+	MOVOU     X2, X3             \
+	PUNPCKLWL X0, X2             \
+	PUNPCKHWL X0, X3             \
+	MOVOU     bias0(DX), X6      \
+	PADDL     X6, X2             \
+	MOVOU     bias1(DX), X6      \
+	PADDL     X6, X3             \
+	PSRAL     $17, X2            \
+	PSRAL     $17, X3            \
+	PACKSSLW  X3, X2             \
+	MOVOU     qk2047<>(SB), X4   \
+	PMINSW    X4, X2             \
+	MOVOU     320+moff(DX), X6   \
+	MOVOU     X2, X5             \
+	PMULLW    X6, X5             \
+	PXOR      X1, X2             \
+	PSUBW     X1, X2             \
+	PXOR      X1, X5             \
+	PSUBW     X1, X5             \
+	MOVOU     X2, inoff(DI)      \
+	MOVOU     X5, inoff(SI)
+
+// func quantizeSSE(in, out *int16, m *qmatrix)
+TEXT ·quantizeSSE(SB), NOSPLIT, $0-24
+	MOVQ in+0(FP), SI
+	MOVQ out+8(FP), DI
+	MOVQ m+16(FP), DX
+
+	QHALF(0, 0, 128, 144)
+	QHALF(16, 16, 160, 176)
+	RET

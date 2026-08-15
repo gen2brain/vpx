@@ -21,6 +21,11 @@ type qmatrix struct {
 	bias    [16]uint32
 	zthresh [16]uint32
 	sharpen [16]uint32
+
+	q16       [16]uint16
+	iq16      [16]uint16
+	sharpen16 [16]uint16
+	narrow    bool
 }
 
 func (m *qmatrix) expand(kind int) int {
@@ -49,6 +54,18 @@ func (m *qmatrix) expand(kind int) int {
 		}
 
 		sum += m.q[i]
+
+		m.q16[i] = uint16(m.q[i])
+		m.iq16[i] = uint16(m.iq[i])
+		m.sharpen16[i] = uint16(m.sharpen[i])
+	}
+
+	m.narrow = true
+
+	for i := range 16 {
+		if m.q[i] > 0xffff || m.iq[i] > 0xffff || m.sharpen[i] > 0xffff {
+			m.narrow = false
+		}
 	}
 
 	return int((sum + 8) >> 4)
@@ -138,6 +155,37 @@ func fTransformWHT(in []int16, out []int16) {
 }
 
 func quantizeBlock(in, out []int16, m *qmatrix, first int) int {
+	if quantizeAsm != nil && m.narrow && len(in) >= 16 && len(out) >= 16 {
+		dc := in[0]
+
+		quantizeAsm(in, out, m)
+
+		if first == 1 {
+			in[0] = dc
+		}
+
+		var tmp [16]int16
+
+		copy(tmp[:], out[:16])
+
+		last := first - 1
+
+		for n := first; n < 16; n++ {
+			l := tmp[zigzag[n]]
+			out[n] = l
+
+			if l != 0 {
+				last = n
+			}
+		}
+
+		return last + 1
+	}
+
+	return quantizeBlockGo(in, out, m, first)
+}
+
+func quantizeBlockGo(in, out []int16, m *qmatrix, first int) int {
 	last := first - 1
 
 	for n := first; n < 16; n++ {

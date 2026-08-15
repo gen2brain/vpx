@@ -20,6 +20,9 @@ func sseRVV(a, b *byte, size int) int
 //go:noescape
 func fTransformRVV(src, ref *byte, out *int16)
 
+//go:noescape
+func quantizeRVV(in, out *int16, m *qmatrix)
+
 func dspInit() {
 	vFilter16Asm = func(p []byte, off, stride, limit, ilevel, hevThresh int) {
 		filterRVV(&p[off], stride, 1, 16, limit, ilevel, hevThresh, 1)
@@ -81,6 +84,10 @@ func dspInit() {
 
 	fTransformAsm = func(src, ref []byte, sOff, rOff int, out []int16) {
 		fTransformRVV(&src[sOff], &ref[rOff], &out[0])
+	}
+
+	quantizeAsm = func(in, out []int16, m *qmatrix) {
+		quantizeRVV(&in[0], &out[0], m)
 	}
 
 	sixtapHAsm = func(dst []byte, dOff, dStride int, src []byte, sOff, sStride, w, h int, f *[6]int16) {

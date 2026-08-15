@@ -206,3 +206,66 @@ TEXT ·fTransformNEON(SB), NOSPLIT, $0-24
 	ADD  $24, R2, R3
 	VST1 [V3.D1], (R3)
 	RET
+
+#define UMULLS(m, n, d)  WORD $(0x2E60C000 | ((m) << 16) | ((n) << 5) | (d))
+#define UMULLS2(m, n, d) WORD $(0x6E60C000 | ((m) << 16) | ((n) << 5) | (d))
+#define MULHH(m, n, d)   WORD $(0x4E609C00 | ((m) << 16) | ((n) << 5) | (d))
+
+#define QHALF(inoff, moff, bias0, bias1) \
+	VLD1  (R4), [V0.H8]              \
+	SSHRH8(15, 0, 1)                 \
+	VEOR  V1.B16, V0.B16, V0.B16     \
+	VSUB  V1.H8, V0.H8, V0.H8        \
+	VLD1  (R5), [V2.H8]              \
+	VADD  V2.H8, V0.H8, V0.H8        \
+	VLD1  (R6), [V3.H8]              \
+	UMULLS(3, 0, 4)                  \
+	UMULLS2(3, 0, 6)                 \
+	VLD1  (R7), [V8.S4]              \
+	VLD1  (R8), [V9.S4]              \
+	VADD  V8.S4, V4.S4, V4.S4        \
+	VADD  V9.S4, V6.S4, V6.S4        \
+	VUSHR $17, V4.S4, V4.S4          \
+	VUSHR $17, V6.S4, V6.S4          \
+	VUZP1 V6.H8, V4.H8, V10.H8       \
+	VUMIN V11.H8, V10.H8, V10.H8     \
+	VLD1  (R9), [V12.H8]             \
+	MULHH(12, 10, 13)                \
+	VEOR  V1.B16, V10.B16, V10.B16   \
+	VSUB  V1.H8, V10.H8, V10.H8      \
+	VEOR  V1.B16, V13.B16, V13.B16   \
+	VSUB  V1.H8, V13.H8, V13.H8      \
+	VST1  [V10.H8], (R10)            \
+	VST1  [V13.H8], (R4)
+
+#define SSHRH8(k, n, d) WORD $(0x4F000400 | ((32 - (k)) << 16) | ((n) << 5) | (d))
+
+// func quantizeNEON(in, out *int16, m *qmatrix)
+TEXT ·quantizeNEON(SB), NOSPLIT, $0-24
+	MOVD in+0(FP), R0
+	MOVD out+8(FP), R1
+	MOVD m+16(FP), R2
+
+	MOVD $2047, R3
+	VDUP R3, V11.H8
+
+	MOVD R0, R4
+	ADD  $384, R2, R5
+	ADD  $352, R2, R6
+	ADD  $128, R2, R7
+	ADD  $144, R2, R8
+	ADD  $320, R2, R9
+	MOVD R1, R10
+
+	QHALF(0, 0, 128, 144)
+
+	ADD $16, R0, R4
+	ADD $400, R2, R5
+	ADD $368, R2, R6
+	ADD $160, R2, R7
+	ADD $176, R2, R8
+	ADD $336, R2, R9
+	ADD $16, R1, R10
+
+	QHALF(16, 16, 160, 176)
+	RET

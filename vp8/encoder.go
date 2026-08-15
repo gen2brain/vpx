@@ -52,6 +52,7 @@ type Encoder struct {
 
 	sc     [yuvSize]uint8
 	levels [y2Block + 1][16]int16
+	dc     [16]int16
 	nz     [y2Block + 1]int
 }
 
@@ -220,16 +221,14 @@ func (e *Encoder) transformLuma(m *mbData) uint32 {
 		fTransform(e.sc[:], b, yOff+scan[n], yOff+scan[n], m.coeffs[16*n:])
 	}
 
-	var dc [16]int16
+	fTransformWHT(m.coeffs[:], e.dc[:])
 
-	fTransformWHT(m.coeffs[:], dc[:])
-
-	e.nz[y2Block] = quantizeBlock(dc[:], e.levels[y2Block][:], &e.y2, 0)
+	e.nz[y2Block] = quantizeBlock(e.dc[:], e.levels[y2Block][:], &e.y2, 0)
 
 	if e.nz[y2Block] > 1 {
-		transformWHT(dc[:], m.coeffs[:])
+		transformWHT(e.dc[:], m.coeffs[:])
 	} else {
-		dc0 := (dc[0] + 3) >> 3
+		dc0 := (e.dc[0] + 3) >> 3
 
 		for i := 0; i < 16*16; i += 16 {
 			m.coeffs[i] = dc0

@@ -19,6 +19,7 @@ var (
 
 	sseAsm        func(a, b []byte, off, size int) int
 	fTransformAsm func(src, ref []byte, sOff, rOff int, out []int16)
+	quantizeAsm   func(in, out []int16, m *qmatrix)
 )
 
 func init() {
