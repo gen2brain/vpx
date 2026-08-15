@@ -2,9 +2,38 @@
 
 package vp8
 
-var hasAVX2 = cpuidAVX2()
+var (
+	hasAVX2   = cpuidAVX2()
+	hasAVX512 = cpuidAVX512()
+)
 
 func cpuidAVX2() bool
+
+func cpuidAVX512() bool
+
+//go:noescape
+func vFilter16AVX512(p *byte, stride, limit, ilevel, hevThresh int)
+
+//go:noescape
+func vFilter16iAVX512(p *byte, stride, limit, ilevel, hevThresh int)
+
+//go:noescape
+func vFilter8AVX512(u, v *byte, stride, limit, ilevel, hevThresh int)
+
+//go:noescape
+func vFilter8iAVX512(u, v *byte, stride, limit, ilevel, hevThresh int)
+
+//go:noescape
+func hFilter16AVX512(p *byte, stride, limit, ilevel, hevThresh int)
+
+//go:noescape
+func hFilter16iAVX512(p *byte, stride, limit, ilevel, hevThresh int)
+
+//go:noescape
+func hFilter8AVX512(u, v *byte, stride, limit, ilevel, hevThresh int)
+
+//go:noescape
+func hFilter8iAVX512(u, v *byte, stride, limit, ilevel, hevThresh int)
 
 //go:noescape
 func vFilter16SSE(p *byte, stride, limit, ilevel, hevThresh int)
@@ -165,6 +194,40 @@ func dspInit() {
 		}
 
 		quantizeSSE(&in[0], &out[0], m)
+	}
+
+	if hasAVX512 {
+		vFilter16Asm = func(p []byte, off, stride, limit, ilevel, hevThresh int) {
+			vFilter16AVX512(&p[off], stride, limit, ilevel, hevThresh)
+		}
+
+		vFilter16iAsm = func(p []byte, off, stride, limit, ilevel, hevThresh int) {
+			vFilter16iAVX512(&p[off], stride, limit, ilevel, hevThresh)
+		}
+
+		vFilter8Asm = func(u, v []byte, off, stride, limit, ilevel, hevThresh int) {
+			vFilter8AVX512(&u[off], &v[off], stride, limit, ilevel, hevThresh)
+		}
+
+		vFilter8iAsm = func(u, v []byte, off, stride, limit, ilevel, hevThresh int) {
+			vFilter8iAVX512(&u[off], &v[off], stride, limit, ilevel, hevThresh)
+		}
+
+		hFilter16Asm = func(p []byte, off, stride, limit, ilevel, hevThresh int) {
+			hFilter16AVX512(&p[off], stride, limit, ilevel, hevThresh)
+		}
+
+		hFilter16iAsm = func(p []byte, off, stride, limit, ilevel, hevThresh int) {
+			hFilter16iAVX512(&p[off], stride, limit, ilevel, hevThresh)
+		}
+
+		hFilter8Asm = func(u, v []byte, off, stride, limit, ilevel, hevThresh int) {
+			hFilter8AVX512(&u[off], &v[off], stride, limit, ilevel, hevThresh)
+		}
+
+		hFilter8iAsm = func(u, v []byte, off, stride, limit, ilevel, hevThresh int) {
+			hFilter8iAVX512(&u[off], &v[off], stride, limit, ilevel, hevThresh)
+		}
 	}
 
 	sixtapVAsm = func(dst []byte, dOff, dStride int, src []byte, sOff, sStride, w, h int, f *[6]int16) {

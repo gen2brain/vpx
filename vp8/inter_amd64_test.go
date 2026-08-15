@@ -276,6 +276,162 @@ func BenchmarkEncoderKernels(b *testing.B) {
 	}
 }
 
+func TestFilterKernelsSSEAndAVX512(t *testing.T) {
+	const (
+		stride = 64
+		rows   = 40
+	)
+
+	r := rand.New(rand.NewPCG(41, 42))
+
+	src := make([]byte, stride*rows)
+	want := make([]byte, stride*rows)
+	sse := make([]byte, stride*rows)
+	avx := make([]byte, stride*rows)
+	wantV := make([]byte, stride*rows)
+	sseV := make([]byte, stride*rows)
+	avxV := make([]byte, stride*rows)
+	rowWalk := make([]int, rows)
+	colWalk := make([]int, stride)
+
+	for iter := range 20000 {
+		randPlane(r, src, stride, rowWalk, colWalk)
+
+		f := randFInfo(r)
+		off := (8+r.IntN(8))*stride + 8 + r.IntN(16)
+
+		for _, p := range [][]byte{want, sse, avx, wantV, sseV, avxV} {
+			copy(p, src)
+		}
+
+		switch iter & 7 {
+		case 0:
+			vFilterLoop26(want, off, stride, 16, f)
+			vFilter16SSE(&sse[off], stride, f.limit, f.ilevel, f.hevThresh)
+
+			if hasAVX512 {
+				vFilter16AVX512(&avx[off], stride, f.limit, f.ilevel, f.hevThresh)
+			}
+		case 1:
+			for k := range 3 {
+				vFilterLoop24(want, off+(k+1)*4*stride, stride, 16, f)
+			}
+
+			vFilter16iSSE(&sse[off], stride, f.limit, f.ilevel, f.hevThresh)
+
+			if hasAVX512 {
+				vFilter16iAVX512(&avx[off], stride, f.limit, f.ilevel, f.hevThresh)
+			}
+		case 2:
+			vFilterLoop26(want, off, stride, 8, f)
+			vFilterLoop26(wantV, off, stride, 8, f)
+			vFilter8SSE(&sse[off], &sseV[off], stride, f.limit, f.ilevel, f.hevThresh)
+
+			if hasAVX512 {
+				vFilter8AVX512(&avx[off], &avxV[off], stride, f.limit, f.ilevel, f.hevThresh)
+			}
+		case 3:
+			vFilterLoop24(want, off+4*stride, stride, 8, f)
+			vFilterLoop24(wantV, off+4*stride, stride, 8, f)
+			vFilter8iSSE(&sse[off], &sseV[off], stride, f.limit, f.ilevel, f.hevThresh)
+
+			if hasAVX512 {
+				vFilter8iAVX512(&avx[off], &avxV[off], stride, f.limit, f.ilevel, f.hevThresh)
+			}
+		case 4:
+			hFilterLoop26(want, off, stride, 16, f)
+			hFilter16SSE(&sse[off], stride, f.limit, f.ilevel, f.hevThresh)
+
+			if hasAVX512 {
+				hFilter16AVX512(&avx[off], stride, f.limit, f.ilevel, f.hevThresh)
+			}
+		case 5:
+			for k := range 3 {
+				hFilterLoop24(want, off+(k+1)*4, stride, 16, f)
+			}
+
+			hFilter16iSSE(&sse[off], stride, f.limit, f.ilevel, f.hevThresh)
+
+			if hasAVX512 {
+				hFilter16iAVX512(&avx[off], stride, f.limit, f.ilevel, f.hevThresh)
+			}
+		case 6:
+			hFilterLoop26(want, off, stride, 8, f)
+			hFilterLoop26(wantV, off, stride, 8, f)
+			hFilter8SSE(&sse[off], &sseV[off], stride, f.limit, f.ilevel, f.hevThresh)
+
+			if hasAVX512 {
+				hFilter8AVX512(&avx[off], &avxV[off], stride, f.limit, f.ilevel, f.hevThresh)
+			}
+		case 7:
+			hFilterLoop24(want, off+4, stride, 8, f)
+			hFilterLoop24(wantV, off+4, stride, 8, f)
+			hFilter8iSSE(&sse[off], &sseV[off], stride, f.limit, f.ilevel, f.hevThresh)
+
+			if hasAVX512 {
+				hFilter8iAVX512(&avx[off], &avxV[off], stride, f.limit, f.ilevel, f.hevThresh)
+			}
+		}
+
+		if !bytes.Equal(want, sse) || !bytes.Equal(wantV, sseV) {
+			t.Fatalf("iter %d: SSE2 mismatch off=%d %+v", iter, off, f)
+		}
+
+		if hasAVX512 && (!bytes.Equal(want, avx) || !bytes.Equal(wantV, avxV)) {
+			t.Fatalf("iter %d: AVX512 mismatch off=%d %+v", iter, off, f)
+		}
+	}
+}
+
+func BenchmarkLoopFilter(b *testing.B) {
+	const (
+		stride = 64
+		rows   = 40
+	)
+
+	r := rand.New(rand.NewPCG(43, 44))
+
+	p := make([]byte, stride*rows)
+	q := make([]byte, stride*rows)
+	rowWalk := make([]int, rows)
+	colWalk := make([]int, stride)
+
+	randPlane(r, p, stride, rowWalk, colWalk)
+	copy(q, p)
+
+	f := fInfo{limit: 40, ilevel: 9, hevThresh: 2}
+	off := 12*stride + 16
+
+	kernels := []struct {
+		name string
+		sse  func()
+		avx  func()
+	}{
+		{"v16", func() { vFilter16SSE(&p[off], stride, f.limit, f.ilevel, f.hevThresh) }, func() { vFilter16AVX512(&p[off], stride, f.limit, f.ilevel, f.hevThresh) }},
+		{"v16i", func() { vFilter16iSSE(&p[off], stride, f.limit, f.ilevel, f.hevThresh) }, func() { vFilter16iAVX512(&p[off], stride, f.limit, f.ilevel, f.hevThresh) }},
+		{"h16", func() { hFilter16SSE(&p[off], stride, f.limit, f.ilevel, f.hevThresh) }, func() { hFilter16AVX512(&p[off], stride, f.limit, f.ilevel, f.hevThresh) }},
+		{"h16i", func() { hFilter16iSSE(&p[off], stride, f.limit, f.ilevel, f.hevThresh) }, func() { hFilter16iAVX512(&p[off], stride, f.limit, f.ilevel, f.hevThresh) }},
+		{"v8", func() { vFilter8SSE(&p[off], &q[off], stride, f.limit, f.ilevel, f.hevThresh) }, func() { vFilter8AVX512(&p[off], &q[off], stride, f.limit, f.ilevel, f.hevThresh) }},
+		{"h8i", func() { hFilter8iSSE(&p[off], &q[off], stride, f.limit, f.ilevel, f.hevThresh) }, func() { hFilter8iAVX512(&p[off], &q[off], stride, f.limit, f.ilevel, f.hevThresh) }},
+	}
+
+	for _, k := range kernels {
+		b.Run(k.name+"/SSE2", func(b *testing.B) {
+			for b.Loop() {
+				k.sse()
+			}
+		})
+
+		if hasAVX512 {
+			b.Run(k.name+"/AVX512", func(b *testing.B) {
+				for b.Loop() {
+					k.avx()
+				}
+			})
+		}
+	}
+}
+
 func TestFTransform2AVX2MatchesScalar(t *testing.T) {
 	if !hasAVX2 {
 		t.Skip("no AVX2")
