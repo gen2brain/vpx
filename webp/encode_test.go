@@ -450,7 +450,9 @@ func TestHuffCodeRoundTrip(t *testing.T) {
 				lengths[i] = uint16(l)
 			}
 
-			tree, err := buildTree(lengths)
+			var a huffArena
+
+			tree, err := a.buildTree(lengths)
 			if err != nil {
 				t.Fatalf("size %d hist %d: buildTree: %v", size, hi, err)
 			}

@@ -20,11 +20,62 @@ func singleTree(symbol uint16) huffTree {
 	return huffTree{single: true, symbol: symbol}
 }
 
-func twoTree(zero, one uint16) huffTree {
-	return huffTree{
-		mask:    1,
-		primary: []uint16{1<<12 | zero, 1<<12 | one},
+func (a *huffArena) twoTree(zero, one uint16) huffTree {
+	p := a.alloc(2)
+	p[0] = 1<<12 | zero
+	p[1] = 1<<12 | one
+
+	return huffTree{mask: 1, primary: p}
+}
+
+const arenaChunk = 1 << 14
+
+type huffArena struct {
+	chunks [][]uint16
+	cur    int
+	off    int
+	sorted []uint16
+	sec    []uint16
+}
+
+func (a *huffArena) reset() {
+	a.cur = 0
+	a.off = 0
+}
+
+func (a *huffArena) alloc(n int) []uint16 {
+	if n > arenaChunk {
+		return make([]uint16, n)
 	}
+
+	for a.cur < len(a.chunks) {
+		if c := a.chunks[a.cur]; a.off+n <= len(c) {
+			s := c[a.off : a.off+n : a.off+n]
+			a.off += n
+
+			clear(s)
+
+			return s
+		}
+
+		a.cur++
+		a.off = 0
+	}
+
+	a.chunks = append(a.chunks, make([]uint16, arenaChunk))
+
+	s := a.chunks[a.cur][:n:n]
+	a.off = n
+
+	return s
+}
+
+func (a *huffArena) scratch(n int) []uint16 {
+	if cap(a.sorted) < n {
+		a.sorted = make([]uint16, n)
+	}
+
+	return a.sorted[:n]
 }
 
 func nextCodeword(cw, size uint16) uint16 {
@@ -38,7 +89,7 @@ func nextCodeword(cw, size uint16) uint16 {
 	return cw&(bit-1) | bit
 }
 
-func buildTree(lengths []uint16) (huffTree, error) {
+func (a *huffArena) buildTree(lengths []uint16) (huffTree, error) {
 	var t huffTree
 
 	var hist [maxCodeLength + 1]int
@@ -90,7 +141,7 @@ func buildTree(lengths []uint16) (huffTree, error) {
 		return t, ErrInvalid
 	}
 
-	sorted := make([]uint16, len(lengths))
+	sorted := a.scratch(len(lengths))
 	next := offsets
 
 	for symbol, l := range lengths {
@@ -100,7 +151,7 @@ func buildTree(lengths []uint16) (huffTree, error) {
 
 	tableBits := min(maxLength, maxTableBits)
 	t.mask = uint16(1)<<tableBits - 1
-	t.primary = make([]uint16, 1<<tableBits)
+	t.primary = a.alloc(1 << tableBits)
 
 	codeword := uint16(0)
 	i := hist[0]
@@ -123,6 +174,12 @@ func buildTree(lengths []uint16) (huffTree, error) {
 		return t, nil
 	}
 
+	if cap(a.sec) < maxSecondary {
+		a.sec = make([]uint16, maxSecondary)
+	}
+
+	sec := a.sec[:0]
+
 	subStart := 0
 	subPrefix := -1
 
@@ -132,32 +189,37 @@ func buildTree(lengths []uint16) (huffTree, error) {
 		for range hist[length] {
 			if prefix := int(codeword & t.mask); prefix != subPrefix {
 				subPrefix = prefix
-				subStart = len(t.secondary)
+				subStart = len(sec)
 
 				if subStart+subSize > maxSecondary {
 					return t, ErrInvalid
 				}
 
 				t.primary[subPrefix] = uint16(length)<<12 | uint16(subStart)
-				t.secondary = append(t.secondary, make([]uint16, subSize)...)
+
+				sec = sec[:subStart+subSize]
+				clear(sec[subStart:])
 			}
 
-			t.secondary[subStart+int(codeword>>tableBits)] = sorted[i]<<4 | uint16(length)
+			sec[subStart+int(codeword>>tableBits)] = sorted[i]<<4 | uint16(length)
 			i++
 			codeword = nextCodeword(codeword, uint16(1)<<length)
 		}
 
 		if length < maxLength && int(codeword&t.mask) == subPrefix {
-			grown := len(t.secondary) - subStart
+			grown := len(sec) - subStart
 
-			if len(t.secondary)+grown > maxSecondary {
+			if len(sec)+grown > maxSecondary {
 				return t, ErrInvalid
 			}
 
-			t.secondary = append(t.secondary, t.secondary[subStart:]...)
+			sec = append(sec, sec[subStart:]...)
 			t.primary[subPrefix] = uint16(length+1)<<12 | uint16(subStart)
 		}
 	}
+
+	t.secondary = a.alloc(len(sec))
+	copy(t.secondary, sec)
 
 	return t, nil
 }

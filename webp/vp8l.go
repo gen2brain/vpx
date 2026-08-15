@@ -121,11 +121,14 @@ type losslessDecoder struct {
 	order      []int
 	buf        []uint32
 	tmp        []uint32
+	arena      huffArena
+	lenScratch []uint16
 }
 
 func (d *losslessDecoder) reset() {
 	d.transforms = [numTransforms]*transform{}
 	d.order = d.order[:0]
+	d.arena.reset()
 }
 
 // release drops what the last decode held, so a pooled decoder keeps only the
@@ -413,7 +416,7 @@ func (d *losslessDecoder) readHuffmanCode(size int) (huffTree, error) {
 			return huffTree{}, ErrInvalid
 		}
 
-		return twoTree(zero, one), nil
+		return d.arena.twoTree(zero, one), nil
 	}
 
 	var codeLengths [codeLengthCodes]uint16
@@ -428,7 +431,7 @@ func (d *losslessDecoder) readHuffmanCode(size int) (huffTree, error) {
 		return huffTree{}, err
 	}
 
-	return buildTree(lengths)
+	return d.arena.buildTree(lengths)
 }
 
 var (
@@ -437,7 +440,7 @@ var (
 )
 
 func (d *losslessDecoder) readCodeLengths(codeLengths []uint16, size int) ([]uint16, error) {
-	table, err := buildTree(codeLengths)
+	table, err := d.arena.buildTree(codeLengths)
 	if err != nil {
 		return nil, err
 	}
@@ -455,7 +458,13 @@ func (d *losslessDecoder) readCodeLengths(codeLengths []uint16, size int) ([]uin
 		maxSymbol = 2 + v
 	}
 
-	lengths := make([]uint16, size)
+	if cap(d.lenScratch) < size {
+		d.lenScratch = make([]uint16, size)
+	}
+
+	lengths := d.lenScratch[:size]
+	clear(lengths)
+
 	prev := uint16(8)
 	symbol := 0
 

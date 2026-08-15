@@ -544,10 +544,10 @@ func TestDecodeAllocs(t *testing.T) {
 		fn   func(b []byte)
 	}{
 		{"test.webp", 12, func(b []byte) { Decode(bytes.NewReader(b)) }},
-		{"lossy_alpha.webp", 24, func(b []byte) { Decode(bytes.NewReader(b)) }},
-		{"simple.webp", 100, func(b []byte) { Decode(bytes.NewReader(b)) }},
+		{"lossy_alpha.webp", 14, func(b []byte) { Decode(bytes.NewReader(b)) }},
+		{"simple.webp", 24, func(b []byte) { Decode(bytes.NewReader(b)) }},
 		{"test.webp", 6, func(b []byte) { DecodeConfig(bytes.NewReader(b)) }},
-		{"anim.webp", 300, func(b []byte) { DecodeAll(bytes.NewReader(b)) }},
+		{"anim.webp", 220, func(b []byte) { DecodeAll(bytes.NewReader(b)) }},
 		// Two above the serial ceiling: the pipeline's goroutines, when the
 		// scheduler does not reuse their gs.
 		{"test.webp", 14, func(b []byte) { Decode(bytes.NewReader(b), Options{Threads: 3}) }},
