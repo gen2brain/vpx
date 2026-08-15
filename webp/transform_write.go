@@ -576,19 +576,6 @@ func redBlueHistograms(px []uint32, width int, red, blue *[256]uint32) {
 	}
 }
 
-func undoCrossColor(px []uint32, width, height, bits int, codes []uint32) {
-	tilesPerRow := subSampleSize(width, bits)
-
-	for y := range height {
-		row := px[y*width : y*width+width]
-		codes := codes[(y>>bits)*tilesPerRow:]
-
-		for x := range width {
-			row[x] = transformColorInverse(codes[x>>bits], row[x])
-		}
-	}
-}
-
 func redBlueAlwaysZero(px []uint32) bool {
 	for _, v := range px {
 		if v&0x00ff00ff != 0 {

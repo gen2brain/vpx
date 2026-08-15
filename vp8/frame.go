@@ -303,6 +303,10 @@ func (d *Decoder) decodeFrame() error {
 	return nil
 }
 
+// DecodeFrame decodes one frame, uncompressed header included, and returns the
+// reconstruction. The picture points into the decoder's own buffers and stays
+// valid until the next call. A frame the stream marks as not shown updates the
+// reference buffers and returns a nil picture with a nil error.
 func (d *Decoder) DecodeFrame(data []byte) (*Picture, error) {
 	if err := d.parseHeader(data); err != nil {
 		return nil, err

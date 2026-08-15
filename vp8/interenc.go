@@ -165,20 +165,7 @@ func (e *Encoder) putInterModes() {
 			continue
 		}
 
-		split := 0
-		if e.rec.modeAt(mbX, mbY-1).split {
-			split += 2
-		}
-
-		if e.rec.modeAt(mbX-1, mbY).split {
-			split += 2
-		}
-
-		if e.rec.modeAt(mbX-1, mbY-1).split {
-			split++
-		}
-
-		w.putBit(0, modeContexts[split][3])
+		w.putBit(0, modeContexts[e.rec.splitContext(mbX, mbY)][3])
 
 		putMV(w, &e.rec.mvProbs, mv{row: m.mv.row - best.row, col: m.mv.col - best.col})
 	}

@@ -7,8 +7,11 @@ import (
 	"io"
 )
 
+// ErrNoExif is returned by [DecodeExif] for a file that carries no EXIF chunk.
 var ErrNoExif = errors.New("webp: no exif data")
 
+// Exif is the EXIF metadata of a file, as far as this package parses it.
+// A field the file does not carry is left at its zero value.
 type Exif struct {
 	Orientation int // EXIF orientation (1-8). 1 = normal, values 2-8 indicate rotation/flip.
 	Width       int // Image width in pixels.
@@ -35,6 +38,8 @@ type Exif struct {
 	Artist    string // Creator/photographer name.
 }
 
+// DecodeExif reads the EXIF metadata of a WebP without decoding its pixels.
+// It returns [ErrNoExif] for a file that carries none.
 func DecodeExif(r io.Reader) (*Exif, error) {
 	s, err := srcFor(r)
 	if err != nil {

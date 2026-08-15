@@ -92,8 +92,12 @@ type Decoder struct {
 	fStrengths [numSegments][numRefFrames][4]fInfo
 	fInfoRow   []uint8
 
+	// SizeLimit bounds the pixel area a frame header may ask to allocate.
+	// Zero means [DefaultFrameSizeLimit].
 	SizeLimit int
 
+	// Threads is the number of goroutines to decode with. Zero means
+	// [runtime.GOMAXPROCS], one is serial.
 	Threads int
 
 	frames    [numFrameBuffers]frameBuffer
@@ -133,6 +137,9 @@ type Decoder struct {
 	pic   Picture
 }
 
+// Release drops the decoder's reference to the frame it was given, so that a
+// pooled decoder does not pin it. The frame buffers are kept for the next
+// decode.
 func (d *Decoder) Release() {
 	d.br = boolDec{}
 

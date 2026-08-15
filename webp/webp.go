@@ -1,13 +1,67 @@
 /*
 Package webp decodes and encodes WebP images.
 
-[Decode] returns the planes the bitstream carries, *[image.NYCbCrA] in 4:2:0,
-which is what a lossy WebP is; an animation frame is composited and so comes
-back as *[image.RGBA]. [DecodeAll] returns every frame of an animation with its
-delay.
+	img, err := webp.Decode(r)
+
+[Decode] returns the planes the bitstream carries: *[image.NYCbCrA] in 4:2:0
+for a lossy image and *[image.NRGBA] for a lossless one. An animation frame is
+composited and comes back as *[image.RGBA]. The package registers itself with
+[image.RegisterFormat], so [image.Decode] works once it is imported for side
+effects. [DecodeAll] returns every frame of an animation with its delay, and
+[DecodeConfig] reports the dimensions without decoding pixels.
+
+Returning *[image.NRGBA] for a lossless still is the one deliberate divergence
+from the package this replaces, which converts everything to *[image.NYCbCrA].
+That conversion loses data; [Options.ToYCbCr] asks for it when parity matters.
+
+A malformed file gives [ErrInvalid] and a well formed one this package cannot
+decode gives [ErrUnsupported]. A caller with another decoder to fall back on
+wants to tell those apart.
+
+A reader that is also an [io.ReaderAt] and an [io.Seeker], such as an *[os.File],
+is addressed by range rather than read into memory: [DecodeConfig] on a 47 KB
+file touches 46 bytes of it, and [Decode] never reads metadata it does not need.
+
+# Options
+
+[Options] are passed to any of the decode and encode functions and default to
+zero:
+
+	img, err := webp.Decode(r, webp.Options{
+		ToRGBA:     true, // premultiplied RGBA instead of the native planes
+		AutoRotate: true, // apply the EXIF orientation
+	})
+
+[Options.ToRGBA] forces *[image.RGBA] with premultiplied alpha and
+[Options.ToYCbCr] forces *[image.NYCbCrA], whichever the image is natively.
+[Options.AlphaDither] smooths an alpha plane whose level count the encoder
+reduced, which libwebp's decoder only does when asked, and so does this one.
+[Options.Threads] bounds the goroutines a lossy frame is coded over; the output
+is identical either way, and a lossless image is one bitstream and ignores it.
+
+# Metadata
+
+[DecodeExif] reads the EXIF of a file without decoding its pixels and returns
+an [Exif] with the orientation, the camera and lens fields, and the GPS
+position. [Options.AutoRotate] applies the orientation to the decoded image.
+
+# Encoding
+
+	err := webp.Encode(w, img, webp.Options{Quality: 90})
 
 [Encode] writes a lossy image by default and a lossless one with
-[Options.Lossless]. [EncodeAll] writes an animation.
+[Options.Lossless], which is exact. [EncodeAll] writes an animation from a
+[WEBP]. Alpha is carried in both modes, losslessly in both.
+
+[Options.Method] trades speed for size in the range [0,6]. On the lossy side
+subblock intra prediction comes in at 3, and rate-distortion refinement of the
+whole-macroblock modes, the chroma mode and trellis quantization at 5. On the
+lossless side 0 is a single fast pass and the cross-colour transform comes in
+at 6. [Options.Exact] preserves the RGB of fully transparent pixels, which an
+encoder is otherwise free to rewrite.
+
+[Options.Quality] and Method map onto different quantizers in every encoder, so
+comparing file sizes at a matched setting compares different operating points.
 */
 package webp
 
@@ -39,15 +93,17 @@ type WEBP struct {
 	LoopCount int
 }
 
-// Options are the encoding parameters, plus AutoRotate which applies to Decode.
+// Options are the decoding and encoding parameters. The zero value is the
+// default for both; a field a call does not apply to is ignored.
 type Options struct {
 	// Quality in the range [0,100]. Default is 75.
 	Quality int
 	// Lossless enables lossless compression. Lossless ignores quality.
 	Lossless bool
-	// Method is quality/speed trade-off (0=fast, 6=slower-better). Default is 4.
+	// Method is the quality/speed trade-off in the range [0,6]. Default is 4.
 	Method int
-	// Exact preserve the exact RGB values in transparent area.
+	// Exact preserves the RGB of fully transparent pixels, which an encoder
+	// is otherwise free to rewrite.
 	Exact bool
 	// AutoRotate applies the EXIF orientation to the decoded image (Decode/DecodeAll only).
 	AutoRotate bool

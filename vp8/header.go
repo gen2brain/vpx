@@ -11,14 +11,14 @@ var startCode = [3]byte{0x9d, 0x01, 0x2a}
 // FrameHeader is the part of a frame header that is not boolean coded: the
 // frame tag of RFC 6386 §9.1, and on a key frame the picture header of §9.2.
 type FrameHeader struct {
-	KeyFrame bool
-	Profile  int
-	Show     bool
-	PartSize int
-	Width    int
-	Height   int
-	XScale   int
-	YScale   int
+	KeyFrame bool // Whether the frame stands alone.
+	Profile  int  // Reconstruction and loop filter profile, [0,3].
+	Show     bool // Whether the frame is displayed rather than only referenced.
+	PartSize int  // Size in bytes of the first, boolean coded partition.
+	Width    int  // Visible width, key frame only.
+	Height   int  // Visible height, key frame only.
+	XScale   int  // Horizontal upscaling hint, key frame only.
+	YScale   int  // Vertical upscaling hint, key frame only.
 }
 
 func (h FrameHeader) size() int {

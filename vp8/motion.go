@@ -184,75 +184,82 @@ func (e *Encoder) searchMV(mbX, mbY int, best mv, b bounds) (mv, int) {
 }
 
 type interChoice struct {
-	mode  uint8
-	mv    mv
-	score int
+	mode uint8
+	mv   mv
+	rate int
+}
+
+func (d *Decoder) splitContext(mbX, mbY int) int {
+	n := 0
+
+	if d.modeAt(mbX, mbY-1).split {
+		n += 2
+	}
+
+	if d.modeAt(mbX-1, mbY).split {
+		n += 2
+	}
+
+	if d.modeAt(mbX-1, mbY-1).split {
+		n++
+	}
+
+	return n
+}
+
+func (e *Encoder) setInter(mbX, mbY int, m *mbData, c interChoice, b bounds) {
+	mi := e.rec.modeAt(mbX, mbY)
+
+	*mi = modeInfo{refFrame: refLast, mv: c.mv}
+
+	for i := range mi.subMV {
+		mi.subMV[i] = c.mv
+	}
+
+	m.refFrame = refLast
+	m.mode = c.mode
+	m.isI4x4 = false
+	m.needClamp = c.mode == mvNew && b.outside(c.mv)
+
+	e.rec.predictInter(m, mbX, mbY)
 }
 
 func (e *Encoder) pickInter(mbX, mbY int, m *mbData, lv *mbLevels) int {
 	nearest, near, best, cnt := e.rec.nearMVs(mbX, mbY, refLast)
 	b := e.rec.mbBounds(mbX, mbY)
 
-	split := 0
-	if e.rec.modeAt(mbX, mbY-1).split {
-		split += 2
-	}
+	zero := modeContexts[cnt[0]][0]
+	notNearest := modeContexts[cnt[1]][1]
+	notNear := modeContexts[cnt[2]][2]
+	notSplit := modeContexts[e.rec.splitContext(mbX, mbY)][3]
 
-	if e.rec.modeAt(mbX-1, mbY).split {
-		split += 2
-	}
-
-	if e.rec.modeAt(mbX-1, mbY-1).split {
-		split++
-	}
-
-	notZero := probCost(modeContexts[cnt[0]][0], 1)
-	notNearest := notZero + probCost(modeContexts[cnt[1]][1], 1)
-	notNear := notNearest + probCost(modeContexts[cnt[2]][2], 1)
+	toNearest := probCost(zero, 1)
+	toNear := toNearest + probCost(notNearest, 1)
+	toNew := toNear + probCost(notNear, 1)
 
 	found, _ := e.searchMV(mbX, mbY, best, b)
+	delta := mv{row: found.row - best.row, col: found.col - best.col}
 
 	cands := [4]interChoice{
-		{mode: mvZero, score: probCost(modeContexts[cnt[0]][0], 0)},
-		{mode: mvNearest, mv: nearest, score: notZero + probCost(modeContexts[cnt[1]][1], 0)},
-		{mode: mvNear, mv: near, score: notNear - probCost(modeContexts[cnt[2]][2], 1) +
-			probCost(modeContexts[cnt[2]][2], 0)},
-		{mode: mvNew, mv: found, score: notNear + probCost(modeContexts[split][3], 0) +
-			mvCost(&e.rec.mvProbs, mv{row: found.row - best.row, col: found.col - best.col})},
+		{mode: mvZero, rate: probCost(zero, 0)},
+		{mode: mvNearest, mv: nearest, rate: toNearest + probCost(notNearest, 0)},
+		{mode: mvNear, mv: near, rate: toNear + probCost(notNear, 0)},
+		{mode: mvNew, mv: found, rate: toNew + probCost(notSplit, 0) + mvCost(&e.rec.mvProbs, delta)},
 	}
 
-	out := interChoice{score: math.MaxInt}
-	mi := e.rec.modeAt(mbX, mbY)
+	out, score := cands[0], math.MaxInt
 
 	for _, c := range cands {
-		*mi = modeInfo{refFrame: refLast, mv: c.mv}
-
-		m.refFrame = refLast
-		m.mode = c.mode
-		m.isI4x4 = false
-		m.needClamp = c.mode == mvNew && b.outside(c.mv)
-
-		e.rec.predictInter(m, mbX, mbY)
+		e.setInter(mbX, mbY, m, c, b)
 
 		m.nonZeroY = e.transformLuma(m, lv, false)
 
-		if s := e.lumaScore(m, lv, c.score); s < out.score {
-			out = interChoice{mode: c.mode, mv: c.mv, score: s}
+		if s := e.lumaScore(m, lv, c.rate); s < score {
+			out, score = c, s
 		}
 	}
 
-	*mi = modeInfo{refFrame: refLast, mv: out.mv}
+	e.setInter(mbX, mbY, m, out, b)
 
-	for i := range mi.subMV {
-		mi.subMV[i] = out.mv
-	}
-
-	m.refFrame = refLast
-	m.mode = out.mode
-	m.isI4x4 = false
-	m.needClamp = out.mode == mvNew && b.outside(out.mv)
-
-	e.rec.predictInter(m, mbX, mbY)
-
-	return out.score
+	return score
 }

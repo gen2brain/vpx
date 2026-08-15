@@ -7,7 +7,9 @@ type EncodeOptions struct {
 	// Quality in the range [0,100].
 	Quality int
 	// Method is the quality/speed trade-off in the range [0,6].
-	Method  int
+	Method int
+	// Threads is the number of goroutines to encode with. Zero means
+	// [runtime.GOMAXPROCS], one is serial.
 	Threads int
 }
 
@@ -29,14 +31,14 @@ type mbInfo struct {
 	imodes [16]uint8
 }
 
-// Encoder encodes VP8 frames. The zero value is ready to use, and reusing one
-// across frames reuses its buffers and its reference frames.
 const (
 	maxPartition0   = 1 << 19
 	maxI4HeaderBits = 256 * 16 * 16
 	minI4HeaderBits = 256
 )
 
+// Encoder encodes VP8 frames. The zero value is ready to use, and reusing one
+// across frames reuses its buffers and its reference frames.
 type Encoder struct {
 	rec   Decoder
 	proba proba
@@ -84,7 +86,6 @@ type Encoder struct {
 	rdI16      bool
 	saved      i16State
 	savedUV    uvState
-	interSaved i16State
 	intraSaved i16State
 	threads    int
 	dc         [16]int16
@@ -848,6 +849,9 @@ func (e *Encoder) skipProbability() {
 	e.skipProb = uint8((total - skips) * 255 / total)
 }
 
+// Release drops the encoder's reference to the source picture and its output
+// buffer, so that a pooled encoder does not pin them. The reference frames and
+// the working buffers are kept for the next encode.
 func (e *Encoder) Release() {
 	e.src = nil
 	e.out = e.out[:0]
