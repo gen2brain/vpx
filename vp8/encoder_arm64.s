@@ -1,0 +1,208 @@
+//go:build arm64 && !noasm
+
+#include "textflag.h"
+
+#define SMLALS(m, n, d)  WORD $(0x0E608000 | ((m) << 16) | ((n) << 5) | (d))
+#define SMLALS2(m, n, d) WORD $(0x4E608000 | ((m) << 16) | ((n) << 5) | (d))
+
+// func sseNEON(a, b *byte, size int) int
+TEXT ·sseNEON(SB), NOSPLIT, $0-32
+	MOVD a+0(FP), R0
+	MOVD b+8(FP), R1
+	MOVD size+16(FP), R2
+
+	VMOVI $0, V0.B16
+	MOVD  R2, R3
+
+	CMP $16, R2
+	BEQ loop16
+	CMP $8, R2
+	BEQ loop8
+
+loop4:
+	VLD1  (R0), V1.S[0]
+	VLD1  (R1), V2.S[0]
+	VUXTL V1.B8, V1.H8
+	VUXTL V2.B8, V2.H8
+	VSUB  V2.H8, V1.H8, V3.H8
+	SMLALS(3, 3, 0)
+	ADD   $32, R0
+	ADD   $32, R1
+	SUB   $1, R3
+	CBNZ  R3, loop4
+	B     done
+
+loop8:
+	VLD1  (R0), [V1.D1]
+	VLD1  (R1), [V2.D1]
+	VUXTL V1.B8, V1.H8
+	VUXTL V2.B8, V2.H8
+	VSUB  V2.H8, V1.H8, V3.H8
+	SMLALS(3, 3, 0)
+	SMLALS2(3, 3, 0)
+	ADD   $32, R0
+	ADD   $32, R1
+	SUB   $1, R3
+	CBNZ  R3, loop8
+	B     done
+
+loop16:
+	VLD1   (R0), [V1.B16]
+	VLD1   (R1), [V2.B16]
+	VUXTL  V1.B8, V4.H8
+	VUXTL  V2.B8, V5.H8
+	VUXTL2 V1.B16, V6.H8
+	VUXTL2 V2.B16, V7.H8
+	VSUB   V5.H8, V4.H8, V3.H8
+	SMLALS(3, 3, 0)
+	SMLALS2(3, 3, 0)
+	VSUB   V7.H8, V6.H8, V3.H8
+	SMLALS(3, 3, 0)
+	SMLALS2(3, 3, 0)
+	ADD    $32, R0
+	ADD    $32, R1
+	SUB    $1, R3
+	CBNZ   R3, loop16
+
+done:
+	VADDV V0.S4, V1
+	VMOV  V1.S[0], R4
+	MOVD  R4, ret+24(FP)
+	RET
+
+#define SSHRS(k, n, d) WORD $(0x4F000400 | ((64 - (k)) << 16) | ((n) << 5) | (d))
+#define SSHRH(k, n, d) WORD $(0x0F000400 | ((32 - (k)) << 16) | ((n) << 5) | (d))
+#define XTNH(n, d)     WORD $(0x0E612800 | ((n) << 5) | (d))
+#define SMULLS(m, n, d) WORD $(0x0E60C000 | ((m) << 16) | ((n) << 5) | (d))
+
+#define TRANSPOSE4(a, b, c, d, t0, t1, t2, t3) \
+	VTRN1 b.H4, a.H4, t0.H4 \
+	VTRN2 b.H4, a.H4, t1.H4 \
+	VTRN1 d.H4, c.H4, t2.H4 \
+	VTRN2 d.H4, c.H4, t3.H4 \
+	VTRN1 t2.S2, t0.S2, a.S2 \
+	VTRN2 t2.S2, t0.S2, c.S2 \
+	VTRN1 t3.S2, t1.S2, b.S2 \
+	VTRN2 t3.S2, t1.S2, d.S2
+
+// func fTransformNEON(src, ref *byte, out *int16)
+TEXT ·fTransformNEON(SB), NOSPLIT, $0-24
+	MOVD src+0(FP), R0
+	MOVD ref+8(FP), R1
+	MOVD out+16(FP), R2
+
+	VLD1 (R0), V0.S[0]
+	ADD  $32, R0, R3
+	VLD1 (R3), V1.S[0]
+	ADD  $64, R0, R3
+	VLD1 (R3), V2.S[0]
+	ADD  $96, R0, R3
+	VLD1 (R3), V3.S[0]
+
+	VLD1 (R1), V4.S[0]
+	ADD  $32, R1, R3
+	VLD1 (R3), V5.S[0]
+	ADD  $64, R1, R3
+	VLD1 (R3), V6.S[0]
+	ADD  $96, R1, R3
+	VLD1 (R3), V7.S[0]
+
+	VUXTL V0.B8, V0.H8
+	VUXTL V1.B8, V1.H8
+	VUXTL V2.B8, V2.H8
+	VUXTL V3.B8, V3.H8
+	VUXTL V4.B8, V4.H8
+	VUXTL V5.B8, V5.H8
+	VUXTL V6.B8, V6.H8
+	VUXTL V7.B8, V7.H8
+
+	VSUB V4.H4, V0.H4, V0.H4
+	VSUB V5.H4, V1.H4, V1.H4
+	VSUB V6.H4, V2.H4, V2.H4
+	VSUB V7.H4, V3.H4, V3.H4
+
+	TRANSPOSE4(V0, V1, V2, V3, V16, V17, V18, V19)
+
+	VADD V3.H4, V0.H4, V16.H4
+	VADD V2.H4, V1.H4, V17.H4
+	VSUB V2.H4, V1.H4, V18.H4
+	VSUB V3.H4, V0.H4, V19.H4
+
+	VADD V17.H4, V16.H4, V20.H4
+	VSHL $3, V20.H4, V20.H4
+	VSUB V17.H4, V16.H4, V22.H4
+	VSHL $3, V22.H4, V22.H4
+
+	MOVD $2217, R4
+	VDUP R4, V28.H4
+	MOVD $5352, R4
+	VDUP R4, V29.H4
+	MOVD $1812, R4
+	VDUP R4, V30.S4
+	MOVD $937, R4
+	VDUP R4, V31.S4
+
+	SMULLS(28, 18, 24)
+	SMULLS(29, 19, 25)
+	VADD V25.S4, V24.S4, V24.S4
+	VADD V30.S4, V24.S4, V24.S4
+	SSHRS(9, 24, 24)
+	XTNH(24, 21)
+
+	SMULLS(28, 19, 24)
+	SMULLS(29, 18, 25)
+	VSUB V25.S4, V24.S4, V24.S4
+	VADD V31.S4, V24.S4, V24.S4
+	SSHRS(9, 24, 24)
+	XTNH(24, 23)
+
+	TRANSPOSE4(V20, V21, V22, V23, V16, V17, V18, V19)
+
+	VADD V23.H4, V20.H4, V16.H4
+	VADD V22.H4, V21.H4, V17.H4
+	VSUB V22.H4, V21.H4, V18.H4
+	VSUB V23.H4, V20.H4, V19.H4
+
+	MOVD $7, R4
+	VDUP R4, V26.H4
+
+	VADD V26.H4, V16.H4, V27.H4
+	VADD V17.H4, V27.H4, V0.H4
+	SSHRH(4, 0, 0)
+	VSUB V17.H4, V27.H4, V2.H4
+	SSHRH(4, 2, 2)
+
+	MOVD $12000, R4
+	VDUP R4, V30.S4
+	MOVD $51000, R4
+	VDUP R4, V31.S4
+
+	SMULLS(28, 18, 24)
+	SMULLS(29, 19, 25)
+	VADD V25.S4, V24.S4, V24.S4
+	VADD V30.S4, V24.S4, V24.S4
+	SSHRS(16, 24, 24)
+	XTNH(24, 1)
+
+	VMOVI $0, V26.B16
+	VCMEQ V26.H4, V19.H4, V27.H4
+	MOVD $1, R4
+	VDUP R4, V26.H4
+	VADD  V26.H4, V1.H4, V1.H4
+	VADD  V27.H4, V1.H4, V1.H4
+
+	SMULLS(28, 19, 24)
+	SMULLS(29, 18, 25)
+	VSUB V25.S4, V24.S4, V24.S4
+	VADD V31.S4, V24.S4, V24.S4
+	SSHRS(16, 24, 24)
+	XTNH(24, 3)
+
+	VST1 [V0.D1], (R2)
+	ADD  $8, R2, R3
+	VST1 [V1.D1], (R3)
+	ADD  $16, R2, R3
+	VST1 [V2.D1], (R3)
+	ADD  $24, R2, R3
+	VST1 [V3.D1], (R3)
+	RET

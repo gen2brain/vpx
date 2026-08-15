@@ -144,6 +144,14 @@ func (e *Encoder) loadSource(mbX, mbY int) {
 }
 
 func sse(a, b []byte, off, size int) int {
+	if sseAsm != nil && off >= 0 && len(a)-off >= (size-1)*bps+size && len(b)-off >= (size-1)*bps+size {
+		return sseAsm(a, b, off, size)
+	}
+
+	return sseGo(a, b, off, size)
+}
+
+func sseGo(a, b []byte, off, size int) int {
 	total := 0
 
 	for j := range size {
@@ -296,42 +304,62 @@ func (e *Encoder) codeMB(mbX, mbY int) {
 	e.putResiduals(mbX)
 }
 
+func b2i(v bool) int {
+	if v {
+		return 1
+	}
+
+	return 0
+}
+
 func putLargeValue(w *boolEnc, p *[numProbas]uint8, v int32) {
 	if v < 5 {
-		w.putBit(0, p[3])
+		w.put(0, p[3])
+		w.flushIf()
 
 		if v == 2 {
-			w.putBit(0, p[4])
+			w.put(0, p[4])
+			w.flushIf()
 
 			return
 		}
 
-		w.putBit(1, p[4])
-		w.putBit(int(v-3), p[5])
+		w.put(1, p[4])
+		w.flushIf()
+		w.put(int(v-3), p[5])
+		w.flushIf()
 
 		return
 	}
 
-	w.putBit(1, p[3])
+	w.put(1, p[3])
+	w.flushIf()
 
 	if v < 11 {
-		w.putBit(0, p[6])
+		w.put(0, p[6])
+		w.flushIf()
 
 		if v < 7 {
-			w.putBit(0, p[7])
-			w.putBit(int(v-5), 159)
+			w.put(0, p[7])
+			w.flushIf()
+			w.put(int(v-5), 159)
+			w.flushIf()
 
 			return
 		}
 
-		w.putBit(1, p[7])
-		w.putBit(int(v-7)>>1, 165)
-		w.putBit(int(v-7)&1, 145)
+		w.put(1, p[7])
+		w.flushIf()
+		w.put(int(v-7)>>1, 165)
+		w.flushIf()
+		w.put(int(v-7)&1, 145)
+		w.flushIf()
 
 		return
 	}
 
-	w.putBit(1, p[6])
+	w.put(1, p[6])
+	w.flushIf()
 
 	cat := 0
 	for cat < 3 && v >= 3+8<<(cat+1) {
@@ -340,14 +368,17 @@ func putLargeValue(w *boolEnc, p *[numProbas]uint8, v int32) {
 
 	bit1 := cat >> 1
 
-	w.putBit(bit1, p[8])
-	w.putBit(cat&1, p[9+bit1])
+	w.put(bit1, p[8])
+	w.flushIf()
+	w.put(cat&1, p[9+bit1])
+	w.flushIf()
 
 	probs := catProbs[cat]
 	v -= 3 + 8<<cat
 
 	for i, prob := range probs {
-		w.putBit(int(v>>(len(probs)-1-i))&1, prob)
+		w.put(int(v>>(len(probs)-1-i))&1, prob)
+		w.flushIf()
 	}
 }
 
@@ -356,20 +387,24 @@ func putCoeffs(w *boolEnc, bands *[17]*bandProbs, ctx, first int, levels []int16
 
 	for n := first; n < 16; {
 		if n >= nz {
-			w.putBit(0, p[0])
+			w.put(0, p[0])
+			w.flushIf()
 
 			return
 		}
 
-		w.putBit(1, p[0])
+		w.put(1, p[0])
+		w.flushIf()
 
 		for levels[n] == 0 {
-			w.putBit(0, p[1])
+			w.put(0, p[1])
+			w.flushIf()
 			n++
 			p = &bands[n][0]
 		}
 
-		w.putBit(1, p[1])
+		w.put(1, p[1])
+		w.flushIf()
 
 		v := int32(levels[n])
 		neg := v < 0
@@ -381,15 +416,18 @@ func putCoeffs(w *boolEnc, bands *[17]*bandProbs, ctx, first int, levels []int16
 		next := bands[n+1]
 
 		if v == 1 {
-			w.putBit(0, p[2])
+			w.put(0, p[2])
+			w.flushIf()
 			p = &next[1]
 		} else {
-			w.putBit(1, p[2])
+			w.put(1, p[2])
+			w.flushIf()
 			putLargeValue(w, p, v)
 			p = &next[2]
 		}
 
-		w.putFlag(neg)
+		w.put(b2i(neg), 0x80)
+		w.flushIf()
 
 		n++
 	}

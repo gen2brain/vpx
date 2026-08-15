@@ -38,6 +38,12 @@ func sixtapHNEON(dst *byte, dStride int, src *byte, sStride, w, h int, f *int16)
 //go:noescape
 func sixtapVNEON(dst *byte, dStride int, src *byte, sStride, w, h int, f *int16)
 
+//go:noescape
+func sseNEON(a, b *byte, size int) int
+
+//go:noescape
+func fTransformNEON(src, ref *byte, out *int16)
+
 func dspInit() {
 	vFilter16Asm = func(p []byte, off, stride, limit, ilevel, hevThresh int) {
 		vFilter16NEON(&p[off], stride, limit, ilevel, hevThresh)
@@ -77,6 +83,14 @@ func dspInit() {
 
 	transformDCAsm = func(in []int16, b []byte, off int) {
 		transformDCNEON(&in[0], &b[off])
+	}
+
+	sseAsm = func(a, b []byte, off, size int) int {
+		return sseNEON(&a[off], &b[off], size)
+	}
+
+	fTransformAsm = func(src, ref []byte, sOff, rOff int, out []int16) {
+		fTransformNEON(&src[sOff], &ref[rOff], &out[0])
 	}
 
 	sixtapHAsm = func(dst []byte, dOff, dStride int, src []byte, sOff, sStride, w, h int, f *[6]int16) {

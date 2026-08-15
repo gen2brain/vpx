@@ -55,6 +55,17 @@ func (m *qmatrix) expand(kind int) int {
 }
 
 func fTransform(src, ref []byte, sOff, rOff int, out []int16) {
+	if fTransformAsm != nil && sOff >= 0 && rOff >= 0 &&
+		len(src)-sOff >= 3*bps+8 && len(ref)-rOff >= 3*bps+8 && len(out) >= 16 {
+		fTransformAsm(src, ref, sOff, rOff, out)
+
+		return
+	}
+
+	fTransformGo(src, ref, sOff, rOff, out)
+}
+
+func fTransformGo(src, ref []byte, sOff, rOff int, out []int16) {
 	var tmp [16]int
 
 	for i := range 4 {

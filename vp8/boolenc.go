@@ -49,7 +49,7 @@ func (e *boolEnc) flush() {
 	e.buf = append(e.buf, byte(v))
 }
 
-func (e *boolEnc) putBit(bit int, prob uint8) {
+func (e *boolEnc) put(bit int, prob uint8) {
 	split := e.rng * uint32(prob) >> 8
 
 	if bit != 0 {
@@ -65,11 +65,18 @@ func (e *boolEnc) putBit(bit int, prob uint8) {
 		e.rng = (e.rng+1)<<uint(shift) - 1
 		e.value <<= uint(shift)
 		e.nbBits += shift
-
-		if e.nbBits > 0 {
-			e.flush()
-		}
 	}
+}
+
+func (e *boolEnc) flushIf() {
+	if e.nbBits > 0 {
+		e.flush()
+	}
+}
+
+func (e *boolEnc) putBit(bit int, prob uint8) {
+	e.put(bit, prob)
+	e.flushIf()
 }
 
 func (e *boolEnc) putBool(v bool, prob uint8) {

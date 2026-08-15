@@ -48,6 +48,12 @@ func sixtapHSSE(dst *byte, dStride int, src *byte, sStride, w, h int, f *int16)
 //go:noescape
 func sixtapVSSE(dst *byte, dStride int, src *byte, sStride, w, h int, f *int16)
 
+//go:noescape
+func sseSSE(a, b *byte, size int) int
+
+//go:noescape
+func fTransformSSE(src, ref *byte, out *int16)
+
 func dspInit() {
 	vFilter16Asm = func(p []byte, off, stride, limit, ilevel, hevThresh int) {
 		vFilter16SSE(&p[off], stride, limit, ilevel, hevThresh)
@@ -103,6 +109,14 @@ func dspInit() {
 		}
 
 		sixtapHSSE(&dst[dOff], dStride, &src[sOff], sStride, w, h, &f[0])
+	}
+
+	sseAsm = func(a, b []byte, off, size int) int {
+		return sseSSE(&a[off], &b[off], size)
+	}
+
+	fTransformAsm = func(src, ref []byte, sOff, rOff int, out []int16) {
+		fTransformSSE(&src[sOff], &ref[rOff], &out[0])
 	}
 
 	sixtapVAsm = func(dst []byte, dOff, dStride int, src []byte, sOff, sStride, w, h int, f *[6]int16) {

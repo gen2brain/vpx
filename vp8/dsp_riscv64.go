@@ -14,6 +14,12 @@ func transformDCRVV(in *int16, dst *byte)
 //go:noescape
 func sixtapRVV(dst *byte, dStride int, src *byte, sStride, step, w, h int, f *int16)
 
+//go:noescape
+func sseRVV(a, b *byte, size int) int
+
+//go:noescape
+func fTransformRVV(src, ref *byte, out *int16)
+
 func dspInit() {
 	vFilter16Asm = func(p []byte, off, stride, limit, ilevel, hevThresh int) {
 		filterRVV(&p[off], stride, 1, 16, limit, ilevel, hevThresh, 1)
@@ -67,6 +73,14 @@ func dspInit() {
 
 	transformDCAsm = func(in []int16, b []byte, off int) {
 		transformDCRVV(&in[0], &b[off])
+	}
+
+	sseAsm = func(a, b []byte, off, size int) int {
+		return sseRVV(&a[off], &b[off], size)
+	}
+
+	fTransformAsm = func(src, ref []byte, sOff, rOff int, out []int16) {
+		fTransformRVV(&src[sOff], &ref[rOff], &out[0])
 	}
 
 	sixtapHAsm = func(dst []byte, dOff, dStride int, src []byte, sOff, sStride, w, h int, f *[6]int16) {
