@@ -56,18 +56,21 @@ type Encoder struct {
 	tok boolEnc
 	out []byte
 
-	sc       [yuvSize]uint8
-	lv       mbLevels
-	pipe     *encPipeline
-	topB     []uint8
-	leftB    [4]uint8
-	tryI4    bool
-	i4Levels [16]int16
-	i4Coeffs [16]int16
-	rdI16    bool
-	saved    i16State
-	threads  int
-	dc       [16]int16
+	sc        [yuvSize]uint8
+	lv        mbLevels
+	pipe      *encPipeline
+	topB      []uint8
+	leftB     [4]uint8
+	tryI4     bool
+	tokens    tokenBuf
+	probaNew  [numSlots]uint8
+	probaFlat [numSlots]uint8
+	i4Levels  [16]int16
+	i4Coeffs  [16]int16
+	rdI16     bool
+	saved     i16State
+	threads   int
+	dc        [16]int16
 }
 
 func qualityToQuant(quality int) int {
@@ -457,137 +460,15 @@ func b2i(v bool) int {
 	return 0
 }
 
-func putLargeValue(w *boolEnc, p *[numProbas]uint8, v int32) {
-	if v < 5 {
-		w.put(0, p[3])
-		w.flushIf()
-
-		if v == 2 {
-			w.put(0, p[4])
-			w.flushIf()
-
-			return
-		}
-
-		w.put(1, p[4])
-		w.flushIf()
-		w.put(int(v-3), p[5])
-		w.flushIf()
-
-		return
-	}
-
-	w.put(1, p[3])
-	w.flushIf()
-
-	if v < 11 {
-		w.put(0, p[6])
-		w.flushIf()
-
-		if v < 7 {
-			w.put(0, p[7])
-			w.flushIf()
-			w.put(int(v-5), 159)
-			w.flushIf()
-
-			return
-		}
-
-		w.put(1, p[7])
-		w.flushIf()
-		w.put(int(v-7)>>1, 165)
-		w.flushIf()
-		w.put(int(v-7)&1, 145)
-		w.flushIf()
-
-		return
-	}
-
-	w.put(1, p[6])
-	w.flushIf()
-
-	cat := 0
-	for cat < 3 && v >= 3+8<<(cat+1) {
-		cat++
-	}
-
-	bit1 := cat >> 1
-
-	w.put(bit1, p[8])
-	w.flushIf()
-	w.put(cat&1, p[9+bit1])
-	w.flushIf()
-
-	probs := catProbs[cat]
-	v -= 3 + 8<<cat
-
-	for i, prob := range probs {
-		w.put(int(v>>(len(probs)-1-i))&1, prob)
-		w.flushIf()
-	}
-}
-
-func putCoeffs(w *boolEnc, bands *[17]*bandProbs, ctx, first int, levels []int16, nz int) {
-	p := &bands[first][ctx]
-
-	for n := first; n < 16; {
-		if n >= nz {
-			w.put(0, p[0])
-			w.flushIf()
-
-			return
-		}
-
-		w.put(1, p[0])
-		w.flushIf()
-
-		for levels[n] == 0 {
-			w.put(0, p[1])
-			w.flushIf()
-			n++
-			p = &bands[n][0]
-		}
-
-		w.put(1, p[1])
-		w.flushIf()
-
-		v := int32(levels[n])
-		neg := v < 0
-
-		if neg {
-			v = -v
-		}
-
-		next := bands[n+1]
-
-		if v == 1 {
-			w.put(0, p[2])
-			w.flushIf()
-			p = &next[1]
-		} else {
-			w.put(1, p[2])
-			w.flushIf()
-			putLargeValue(w, p, v)
-			p = &next[2]
-		}
-
-		w.put(b2i(neg), 0x80)
-		w.flushIf()
-
-		n++
-	}
-}
-
 func (e *Encoder) putResiduals(mbX int, lv *mbLevels, i4x4 bool) {
-	w := &e.tok
 	top := &e.ctx[1+mbX]
 	left := &e.ctx[0]
 
 	first := 0
-	acBands := &e.proba.bandsPtr[3]
+	acType := 3
 
 	if !i4x4 {
-		putCoeffs(w, &e.proba.bandsPtr[1], int(top.nzDC)+int(left.nzDC), 0, lv.levels[y2Block][:], lv.nz[y2Block])
+		e.recordCoeffs(1, int(top.nzDC)+int(left.nzDC), 0, lv.levels[y2Block][:], lv.nz[y2Block])
 
 		nzDC := uint8(0)
 		if lv.nz[y2Block] > 0 {
@@ -597,7 +478,7 @@ func (e *Encoder) putResiduals(mbX int, lv *mbLevels, i4x4 bool) {
 		top.nzDC, left.nzDC = nzDC, nzDC
 
 		first = 1
-		acBands = &e.proba.bandsPtr[0]
+		acType = 0
 	}
 
 	tnz := top.nz & 0x0f
@@ -610,7 +491,7 @@ func (e *Encoder) putResiduals(mbX int, lv *mbLevels, i4x4 bool) {
 		for range 4 {
 			ctx := int(l) + int(tnz&1)
 
-			putCoeffs(w, acBands, ctx, first, lv.levels[n][:], lv.nz[n])
+			e.recordCoeffs(acType, ctx, first, lv.levels[n][:], lv.nz[n])
 
 			l = 0
 			if lv.nz[n] > first {
@@ -640,7 +521,7 @@ func (e *Encoder) putResiduals(mbX int, lv *mbLevels, i4x4 bool) {
 			for range 2 {
 				ctx := int(l) + int(tnz&1)
 
-				putCoeffs(w, &e.proba.bandsPtr[2], ctx, 0, lv.levels[n][:], lv.nz[n])
+				e.recordCoeffs(2, ctx, 0, lv.levels[n][:], lv.nz[n])
 
 				l = 0
 				if lv.nz[n] > 0 {
@@ -761,7 +642,16 @@ func (e *Encoder) putHeader() {
 		for b := range numBands {
 			for c := range numCtx {
 				for p := range numProbas {
-					w.putBit(0, coeffUpdateProbs[t][b][c][p])
+					fresh := e.probaNew[slotIndex(t, bandFirst[b], c)+p]
+
+					if fresh == 0 {
+						w.putBit(0, coeffUpdateProbs[t][b][c][p])
+
+						continue
+					}
+
+					w.putBit(1, coeffUpdateProbs[t][b][c][p])
+					w.putBits(uint32(fresh), 8)
 				}
 			}
 		}
@@ -810,12 +700,11 @@ func (e *Encoder) Encode(src *Picture, o EncodeOptions) ([]byte, error) {
 	e.setup(o)
 	e.alloc()
 
-	e.tok.init(e.tok.buf)
+	e.tokens.reset()
 
 	e.encodeRows()
 
-	tokens := e.tok.finish()
-
+	e.updateProbas()
 	e.skipProbability()
 
 	e.hdr.init(e.hdr.buf)
@@ -823,6 +712,11 @@ func (e *Encoder) Encode(src *Picture, o EncodeOptions) ([]byte, error) {
 	e.putModes()
 
 	header := e.hdr.finish()
+
+	e.tok.init(e.tok.buf)
+	e.replayTokens()
+
+	tokens := e.tok.finish()
 
 	tag := uint32(1<<4 | len(header)<<5)
 
