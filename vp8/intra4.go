@@ -43,15 +43,27 @@ func putBMode(w *boolEnc, p *[numBModes - 1]uint8, mode uint8) {
 	}
 }
 
-func bModeCost(p *[numBModes - 1]uint8, mode uint8) int {
-	cost := 0
+var bModeCost = func() *[numBModes][numBModes][numBModes]uint16 {
+	t := new([numBModes][numBModes][numBModes]uint16)
 
-	for _, s := range bModePath[mode] {
-		cost += probCost(p[s.idx], int(s.bit))
+	for a := range numBModes {
+		for b := range numBModes {
+			p := &bModeProbs[a][b]
+
+			for mode := range numBModes {
+				cost := 0
+
+				for _, s := range bModePath[mode] {
+					cost += probCost(p[s.idx], int(s.bit))
+				}
+
+				t[a][b][mode] = uint16(cost)
+			}
+		}
 	}
 
-	return cost
-}
+	return t
+}()
 
 func largeValueCost(p *[numProbas]uint8, v int32) int {
 	if v < 5 {
@@ -157,7 +169,7 @@ func (e *Encoder) pickIntra4(mbX, mbY int, m *mbData, lv *mbLevels) (int, uint32
 		off := yOff + scan[n]
 		x, y := n&3, n>>2
 
-		probs := &bModeProbs[top[x]][left[y]]
+		probs := &bModeCost[top[x]][left[y]]
 
 		bestScore, bestMode, bestNz := math.MaxInt, 0, 0
 
@@ -167,12 +179,19 @@ func (e *Encoder) pickIntra4(mbX, mbY int, m *mbData, lv *mbLevels) (int, uint32
 
 			nz := quantizeBlock(coeffs[:], levels[:], &e.y1, 0)
 
-			transformOne(coeffs[:], b, off)
+			if nz > 0 {
+				transformOne(coeffs[:], b, off)
+			}
 
-			dist := sse(e.sc[:], b, off, 4)
-			rate := bModeCost(probs, uint8(mode)) + coeffCost(&e.proba.bandsPtr[3], 0, 0, levels[:], nz)
+			s := 256*sse(e.sc[:], b, off, 4) + e.lambdaMode*int(probs[mode])
 
-			if s := 256*dist + e.lambdaMode*rate; s < bestScore {
+			if s >= bestScore {
+				continue
+			}
+
+			s += e.lambdaMode * coeffCost(&e.proba.bandsPtr[3], 0, 0, levels[:], nz)
+
+			if s < bestScore {
 				bestScore, bestMode, bestNz = s, mode, nz
 
 				copy(m.coeffs[16*n:16*n+16], coeffs[:])
@@ -181,7 +200,10 @@ func (e *Encoder) pickIntra4(mbX, mbY int, m *mbData, lv *mbLevels) (int, uint32
 		}
 
 		predLuma4[bestMode](b, off)
-		transformOne(m.coeffs[16*n:16*n+16], b, off)
+
+		if bestNz > 0 {
+			transformOne(m.coeffs[16*n:16*n+16], b, off)
+		}
 
 		m.imodes[n] = uint8(bestMode)
 		lv.nz[n] = bestNz
