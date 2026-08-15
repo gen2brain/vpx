@@ -199,8 +199,10 @@ func applySubtractGreen(px []uint32) {
 
 func applyColorIndexing(px, out []uint32, width, height, bits int, table []uint32) []uint32 {
 	if bits == 0 {
+		t := table[:256]
+
 		for i, v := range px {
-			px[i] = table[v>>8&0xff]
+			px[i] = t[v>>8&0xff]
 		}
 
 		return px
@@ -208,23 +210,27 @@ func applyColorIndexing(px, out []uint32, width, height, bits int, table []uint3
 
 	packedWidth := subSampleSize(width, bits)
 	bitsPerPixel := uint(8 >> bits)
-	countMask := 1<<bits - 1
+	perByte := 1 << bits
 	bitMask := uint32(1)<<bitsPerPixel - 1
+	t := table[:bitMask+1]
 
 	for y := range height {
-		var packed uint32
-
 		src := y * packedWidth
 		dst := y * width
 
-		for x := range width {
-			if x&countMask == 0 {
-				packed = px[src] >> 8 & 0xff
-				src++
+		for x := 0; x < width; {
+			packed := px[src] >> 8 & 0xff
+			src++
+
+			n := min(perByte, width-x)
+			row := out[dst+x : dst+x+n]
+
+			for k := range row {
+				row[k] = t[packed&bitMask]
+				packed >>= bitsPerPixel
 			}
 
-			out[dst+x] = table[packed&bitMask]
-			packed >>= bitsPerPixel
+			x += n
 		}
 	}
 
