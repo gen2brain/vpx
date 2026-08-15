@@ -1,6 +1,7 @@
 package vp8
 
 import (
+	"fmt"
 	"math"
 	"math/rand/v2"
 	"testing"
@@ -274,5 +275,107 @@ func TestLevelCostMatchesCoeffCost(t *testing.T) {
 			t.Fatalf("type %d first %d ctx %d nz %d: levelCost sums to %d, coeffCost is %d\n%v",
 				ty, first, ctx0, nz, got, want, levels)
 		}
+	}
+}
+
+func movingPicture(w, h, shift int) *Picture {
+	cw, ch := (w+1)/2, (h+1)/2
+
+	p := &Picture{
+		Y: make([]byte, w*h), U: make([]byte, cw*ch), V: make([]byte, cw*ch),
+		YStride: w, UVStride: cw, Width: w, Height: h,
+	}
+
+	for y := range h {
+		for x := range w {
+			p.Y[y*w+x] = uint8(16 + ((x+shift)*3+y*2)%220)
+		}
+	}
+
+	for y := range ch {
+		for x := range cw {
+			p.U[y*p.UVStride+x] = uint8(60 + ((x+shift)*5)%128)
+			p.V[y*p.UVStride+x] = uint8(200 - (y*7)%128)
+		}
+	}
+
+	return p
+}
+
+func TestEncodeInterRoundTrip(t *testing.T) {
+	for _, size := range [][2]int{{16, 16}, {33, 17}, {176, 144}} {
+		for _, method := range []int{0, 4, 6} {
+			t.Run(fmt.Sprintf("%dx%d/m%d", size[0], size[1], method), func(t *testing.T) {
+				var (
+					e   Encoder
+					d   Decoder
+					key int
+				)
+
+				for f := range 5 {
+					src := movingPicture(size[0], size[1], f)
+					o := EncodeOptions{Quality: 80, Method: method}
+
+					var (
+						data []byte
+						err  error
+					)
+
+					if f == 0 {
+						data, err = e.Encode(src, o)
+						key = len(data)
+					} else {
+						data, err = e.EncodeInter(src, o)
+					}
+
+					if err != nil {
+						t.Fatalf("frame %d: encode: %v", f, err)
+					}
+
+					if got := (data[0] & 1) != 0; got != (f != 0) {
+						t.Fatalf("frame %d: inter flag %v", f, got)
+					}
+
+					pic, err := d.DecodeFrame(data)
+					if err != nil {
+						t.Fatalf("frame %d: decode: %v", f, err)
+					}
+
+					rec := e.rec.frames[e.rec.lastIdx].pic
+
+					for y := range size[1] {
+						for x := range size[0] {
+							if a, b := rec.Y[y*rec.YStride+x], pic.Y[y*pic.YStride+x]; a != b {
+								t.Fatalf("frame %d: luma %d,%d reconstructed %d, decoded %d", f, x, y, a, b)
+							}
+						}
+					}
+
+					if got := psnr(pic.Y, src.Y, pic.YStride, src.YStride, size[0], size[1]); got < 25 {
+						t.Errorf("frame %d: luma PSNR %.1f dB, want at least 25", f, got)
+					}
+
+					if f > 0 && size[0] > 64 && len(data) > key {
+						t.Errorf("frame %d: %d bytes, more than the key frame's %d", f, len(data), key)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestEncodeInterNeedsKeyFrame(t *testing.T) {
+	var e Encoder
+
+	if _, err := e.EncodeInter(movingPicture(64, 48, 0), EncodeOptions{Quality: 80}); err != ErrInvalid {
+		t.Fatalf("inter frame before a key frame: %v, want ErrInvalid", err)
+	}
+
+	if _, err := e.Encode(movingPicture(64, 48, 0), EncodeOptions{Quality: 80}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := e.EncodeInter(movingPicture(80, 48, 1), EncodeOptions{Quality: 80}); err != ErrInvalid {
+		t.Fatalf("inter frame at a new size: %v, want ErrInvalid", err)
 	}
 }

@@ -161,10 +161,9 @@ func (e *Encoder) updateProbas() {
 		c := rest % (numCtx * numProbas) / numProbas
 		p := i % numProbas
 
-		old := coeffProbs[ty][b][c][p]
+		old := e.proba.bands[ty][b][c][p]
 		up := coeffUpdateProbs[ty][b][c][p]
 
-		e.proba.bands[ty][b][c][p] = old
 		e.probaNew[i] = 0
 
 		if n0+n1 == 0 {

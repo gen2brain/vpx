@@ -269,8 +269,18 @@ func (e *Encoder) encodeRows() {
 				e.rec.loadNeighbours(mbX, mbY)
 				e.codeMB(mbX, mbY, &e.lv)
 				e.rec.reconstructMB(&e.rec.mb, mbX, mbY)
+
+				if e.rec.filterType > 0 {
+					e.rec.fInfoRow[mbX] = e.rec.mb.filterFlags()
+				}
+			}
+
+			if e.rec.filterType > 0 {
+				e.rec.filterRow(e.rec.fInfoRow, mbY)
 			}
 		}
+
+		e.rec.frames[e.rec.newIdx].extend(e.mbW, e.mbH)
 
 		return
 	}
@@ -295,10 +305,20 @@ func (e *Encoder) encodeRows() {
 			e.rec.loadNeighbours(mbX, mbY)
 			e.analyzeMB(mbX, mbY, &lv[mbX])
 			e.rec.reconstructMB(&e.rec.mb, mbX, mbY)
+
+			if e.rec.filterType > 0 {
+				e.rec.fInfoRow[mbX] = e.rec.mb.filterFlags()
+			}
+		}
+
+		if e.rec.filterType > 0 {
+			e.rec.filterRow(e.rec.fInfoRow, mbY)
 		}
 
 		p.tok <- rowMsg{row: mbY, slot: slot}
 	}
 
 	p.wg.Wait()
+
+	e.rec.frames[e.rec.newIdx].extend(e.mbW, e.mbH)
 }

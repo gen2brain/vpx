@@ -683,3 +683,88 @@ func BenchmarkDecodeVideo(b *testing.B) {
 		})
 	}
 }
+
+func writeIVF(w, h int, frames [][]byte) []byte {
+	var b []byte
+
+	b = append(b, 'D', 'K', 'I', 'F')
+	b = binary.LittleEndian.AppendUint16(b, 0)
+	b = binary.LittleEndian.AppendUint16(b, 32)
+	b = append(b, 'V', 'P', '8', '0')
+	b = binary.LittleEndian.AppendUint16(b, uint16(w))
+	b = binary.LittleEndian.AppendUint16(b, uint16(h))
+	b = binary.LittleEndian.AppendUint32(b, 30)
+	b = binary.LittleEndian.AppendUint32(b, 1)
+	b = binary.LittleEndian.AppendUint32(b, uint32(len(frames)))
+	b = binary.LittleEndian.AppendUint32(b, 0)
+
+	for i, f := range frames {
+		b = binary.LittleEndian.AppendUint32(b, uint32(len(f)))
+		b = binary.LittleEndian.AppendUint64(b, uint64(i))
+		b = append(b, f...)
+	}
+
+	return b
+}
+
+func TestEncodeVideoAgainstVpxdec(t *testing.T) {
+	bin := vpxdecBin(t)
+
+	const (
+		w, h   = 176, 144
+		frames = 8
+	)
+
+	for _, method := range []int{0, 4, 6} {
+		t.Run(fmt.Sprintf("m%d", method), func(t *testing.T) {
+			var e Encoder
+
+			o := EncodeOptions{Quality: 80, Method: method}
+			out := make([][]byte, 0, frames)
+
+			for f := range frames {
+				src := movingPicture(w, h, f)
+
+				var (
+					data []byte
+					err  error
+				)
+
+				if f == 0 {
+					data, err = e.Encode(src, o)
+				} else {
+					data, err = e.EncodeInter(src, o)
+				}
+
+				if err != nil {
+					t.Fatalf("frame %d: %v", f, err)
+				}
+
+				out = append(out, bytes.Clone(data))
+			}
+
+			ivf := writeIVF(w, h, out)
+
+			path := filepath.Join(t.TempDir(), "enc.ivf")
+			if err := os.WriteFile(path, ivf, 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			ref, err := exec.Command(bin, "--i420", "--md5", path).Output()
+			if err != nil {
+				t.Fatalf("vpxdec: %v", err)
+			}
+
+			want, _, _ := strings.Cut(strings.TrimSpace(string(ref)), " ")
+
+			got, frame, err := decodeIVF(ivf)
+			if err != nil {
+				t.Fatalf("frame %d: %v", frame, err)
+			}
+
+			if got != want {
+				t.Fatalf("md5 %s, libvpx says %s", got, want)
+			}
+		})
+	}
+}

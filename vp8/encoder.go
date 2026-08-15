@@ -23,11 +23,14 @@ type mbInfo struct {
 	uvMode uint8
 	skip   bool
 	i4x4   bool
+	inter  bool
+	mode   uint8
+	mv     mv
 	imodes [16]uint8
 }
 
-// Encoder encodes VP8 key frames. The zero value is ready to use, and reusing
-// one across frames reuses its buffers.
+// Encoder encodes VP8 frames. The zero value is ready to use, and reusing one
+// across frames reuses its buffers and its reference frames.
 const (
 	maxPartition0   = 1 << 19
 	maxI4HeaderBits = 256 * 16 * 16
@@ -59,30 +62,32 @@ type Encoder struct {
 	info []mbInfo
 	ctx  []mbCtx
 
-	buf frameBuffer
-
 	hdr boolEnc
 	tok boolEnc
 	out []byte
 
-	sc        [yuvSize]uint8
-	lv        mbLevels
-	pipe      *encPipeline
-	topB      []uint8
-	leftB     [4]uint8
-	tryI4     bool
-	rdUV      bool
-	trellis   bool
-	tokens    tokenBuf
-	probaNew  [numSlots]uint8
-	probaFlat [numSlots]uint8
-	i4Levels  [16]int16
-	i4Coeffs  [16]int16
-	rdI16     bool
-	saved     i16State
-	savedUV   uvState
-	threads   int
-	dc        [16]int16
+	sc         [yuvSize]uint8
+	lv         mbLevels
+	pipe       *encPipeline
+	topB       []uint8
+	leftB      [4]uint8
+	tryI4      bool
+	rdUV       bool
+	keyFrame   bool
+	probIntra  uint8
+	trellis    bool
+	tokens     tokenBuf
+	probaNew   [numSlots]uint8
+	probaFlat  [numSlots]uint8
+	i4Levels   [16]int16
+	i4Coeffs   [16]int16
+	rdI16      bool
+	saved      i16State
+	savedUV    uvState
+	interSaved i16State
+	intraSaved i16State
+	threads    int
+	dc         [16]int16
 }
 
 func qualityToQuant(quality int) int {
@@ -135,17 +140,28 @@ func (e *Encoder) setup(o EncodeOptions) {
 		e.filterLevel = 0
 	}
 
-	e.proba.reset()
+}
+
+func (e *Encoder) allocFrame() {
+	e.rec.hdr = FrameHeader{KeyFrame: e.keyFrame, Show: true, Width: e.src.Width, Height: e.src.Height}
+	e.rec.mbW, e.rec.mbH = e.mbW, e.mbH
+
+	e.rec.sixtap = true
+	e.rec.seg = segmentHeader{}
+	e.rec.filter = filterHeader{level: e.filterLevel}
+
+	e.rec.precomputeFilterStrengths()
+
+	e.rec.alloc()
+
+	e.rec.newIdx = e.rec.freeBuffer()
+	e.rec.refCnt[e.rec.newIdx] = 1
+
+	e.rec.frames[e.rec.newIdx].alloc(e.mbW, e.mbH, e.src.Width, e.src.Height)
+	e.rec.pic = e.rec.frames[e.rec.newIdx].pic
 }
 
 func (e *Encoder) alloc() {
-	e.rec.hdr = FrameHeader{KeyFrame: true, Show: true, Width: e.src.Width, Height: e.src.Height}
-	e.rec.mbW, e.rec.mbH = e.mbW, e.mbH
-
-	e.buf.alloc(e.mbW, e.mbH, e.src.Width, e.src.Height)
-	e.rec.pic = e.buf.pic
-	e.rec.allocRows()
-
 	if cap(e.info) < e.mbW*e.mbH {
 		e.info = make([]mbInfo, e.mbW*e.mbH)
 	}
@@ -394,17 +410,22 @@ func (e *Encoder) analyzeMB(mbX, mbY int, lv *mbLevels) {
 
 	m.isI4x4 = false
 	m.segment = 0
-	i16 := e.lumaI16(mbX, mbY, m, lv)
+	m.refFrame = refIntra
+	m.mode = 0
+	m.needClamp = false
+
+	intra := e.lumaI16(mbX, mbY, m, lv)
 
 	if e.tryI4 {
 		e.saved.store(m, lv)
 
-		limit := i16 + e.lambdaMode*(probCost(145, 1)-probCost(145, 0))
+		limit := intra + e.lambdaMode*(probCost(145, 1)-probCost(145, 0))
 
 		if i4, bits, ok := e.pickIntra4(mbX, mbY, m, lv, limit); ok && i4 < limit {
 			m.isI4x4 = true
 			m.nonZeroY = bits
 			lv.nz[y2Block] = 0
+			intra = i4
 		} else {
 			e.saved.restore(m, lv)
 		}
@@ -424,15 +445,52 @@ func (e *Encoder) analyzeMB(mbX, mbY int, lv *mbLevels) {
 		}
 	}
 
+	if !e.keyFrame && e.tryInter(mbX, mbY, m, lv, intra) {
+		e.finishMB(mbX, mbY, m, lv)
+
+		return
+	}
+
 	m.uvMode, m.nonZeroUV = e.pickChromaMode(mbX, mbY, m, lv)
 
+	e.finishMB(mbX, mbY, m, lv)
+}
+
+func (e *Encoder) tryInter(mbX, mbY int, m *mbData, lv *mbLevels, intra int) bool {
+	e.intraSaved.store(m, lv)
+
+	i4x4, imodes := m.isI4x4, m.imodes
+
+	if e.pickInter(mbX, mbY, m, lv) < intra {
+		m.nonZeroY = e.transformLuma(m, lv, e.trellis)
+		m.nonZeroUV = e.transformChroma(m, lv)
+
+		return true
+	}
+
+	e.intraSaved.restore(m, lv)
+
+	m.isI4x4, m.imodes = i4x4, imodes
+	m.refFrame = refIntra
+	m.mode = 0
+	m.needClamp = false
+
+	*e.rec.modeAt(mbX, mbY) = modeInfo{}
+
+	return false
+}
+
+func (e *Encoder) finishMB(mbX, mbY int, m *mbData, lv *mbLevels) {
 	skip := m.nonZeroY|m.nonZeroUV == 0 && lv.nz[y2Block] == 0
 
 	m.skip = skip
 	m.skipped = skip
 
 	info := mbInfo{ymode: m.imodes[0], uvMode: m.uvMode, skip: skip, i4x4: m.isI4x4}
-	if m.isI4x4 {
+
+	if m.inter() {
+		info = mbInfo{inter: true, mode: m.mode, mv: e.rec.modeAt(mbX, mbY).mv, skip: skip}
+	} else if m.isI4x4 {
 		info.imodes = m.imodes
 	}
 
@@ -515,6 +573,10 @@ func (e *Encoder) lumaI16(mbX, mbY int, m *mbData, lv *mbLevels) int {
 }
 
 func (e *Encoder) scoreIntra16(m *mbData, lv *mbLevels) int {
+	return e.lumaScore(m, lv, fixedCostsI16[m.imodes[0]])
+}
+
+func (e *Encoder) lumaScore(m *mbData, lv *mbLevels, rate int) int {
 	b := e.rec.yuv[:]
 
 	bits := m.nonZeroY
@@ -524,7 +586,6 @@ func (e *Encoder) scoreIntra16(m *mbData, lv *mbLevels) int {
 		bits <<= 2
 	}
 
-	rate := fixedCostsI16[m.imodes[0]]
 	rate += coeffCost(&e.proba.bandsPtr[1], 0, 0, lv.levels[y2Block][:], lv.nz[y2Block])
 
 	for n := range 16 {
@@ -740,6 +801,18 @@ func (e *Encoder) putHeader() {
 
 	w.putFlag(true)
 
+	e.putTokenProbs()
+
+	w.putFlag(e.useSkip)
+
+	if e.useSkip {
+		w.putBits(uint32(e.skipProb), 8)
+	}
+}
+
+func (e *Encoder) putTokenProbs() {
+	w := &e.hdr
+
 	for t := range numBlockTypes {
 		for b := range numBands {
 			for c := range numCtx {
@@ -757,12 +830,6 @@ func (e *Encoder) putHeader() {
 				}
 			}
 		}
-	}
-
-	w.putFlag(e.useSkip)
-
-	if e.useSkip {
-		w.putBits(uint32(e.skipProb), 8)
 	}
 }
 
@@ -786,32 +853,70 @@ func (e *Encoder) Release() {
 	e.out = e.out[:0]
 }
 
+// Encode writes src as a key frame. Every reference buffer is refreshed, so the
+// frame stands alone and any following inter frame predicts from it.
 func (e *Encoder) Encode(src *Picture, o EncodeOptions) ([]byte, error) {
+	return e.encodeFrame(src, o, true)
+}
+
+// EncodeInter writes src as an inter frame predicted from the frame last
+// encoded. It fails with [ErrInvalid] before any key frame, or if src does not
+// have the dimensions of that key frame.
+func (e *Encoder) EncodeInter(src *Picture, o EncodeOptions) ([]byte, error) {
+	return e.encodeFrame(src, o, false)
+}
+
+func (e *Encoder) encodeFrame(src *Picture, o EncodeOptions, key bool) ([]byte, error) {
 	if src.Width <= 0 || src.Height <= 0 || src.Width >= maxDimension || src.Height >= maxDimension {
+		return nil, ErrInvalid
+	}
+
+	if !key && (e.rec.allocW != src.Width || e.rec.allocH != src.Height) {
 		return nil, ErrInvalid
 	}
 
 	e.src = src
 	e.mbW = (src.Width + 15) / 16
 	e.mbH = (src.Height + 15) / 16
+	e.keyFrame = key
+
+	if key {
+		e.rec.lastIdx, e.rec.goldenIdx, e.rec.altIdx = 0, 0, 0
+		e.rec.refCnt = [numFrameBuffers]int{1, 0, 0, 0}
+	}
 
 	e.setup(o)
+	e.allocFrame()
+
+	if e.keyFrame {
+		e.rec.resetEntropy()
+		e.proba.reset()
+	}
+
+	saved := e.proba.bands
 
 	var header []byte
 
 	for {
 		e.alloc()
-		e.proba.reset()
+		e.proba.bands = saved
 		e.tokens.reset()
 
 		e.encodeRows()
 
 		e.updateProbas()
 		e.skipProbability()
+		e.interProbability()
 
 		e.hdr.init(e.hdr.buf)
-		e.putHeader()
-		e.putModes()
+
+		if e.keyFrame {
+			e.putHeader()
+			e.putModes()
+		} else {
+			e.putInterHeader()
+			e.putInterModes()
+		}
 
 		header = e.hdr.finish()
 
@@ -835,12 +940,26 @@ func (e *Encoder) Encode(src *Picture, o EncodeOptions) ([]byte, error) {
 	tokens := e.tok.finish()
 
 	tag := uint32(1<<4 | len(header)<<5)
+	if !e.keyFrame {
+		tag |= 1
+	}
+
+	e.rec.refreshGolden = true
+	e.rec.refreshAlt = true
+	e.rec.refreshLast = true
+	e.rec.copyGolden = 0
+	e.rec.copyAlt = 0
+	e.rec.rotateBuffers()
 
 	out := e.out[:0]
 
 	out = append(out, byte(tag), byte(tag>>8), byte(tag>>16))
-	out = append(out, startCode[0], startCode[1], startCode[2])
-	out = append(out, byte(src.Width), byte(src.Width>>8), byte(src.Height), byte(src.Height>>8))
+
+	if e.keyFrame {
+		out = append(out, startCode[0], startCode[1], startCode[2])
+		out = append(out, byte(src.Width), byte(src.Width>>8), byte(src.Height), byte(src.Height>>8))
+	}
+
 	out = append(out, header...)
 	out = append(out, tokens...)
 
