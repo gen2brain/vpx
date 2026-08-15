@@ -276,6 +276,7 @@ func (e *encoder) frameChunks(m image.Image, o Options) ([]chunkOut, error) {
 	data, err := e.lossy.Encode(pic, vp8.EncodeOptions{
 		Quality: o.Quality,
 		Method:  o.Method,
+		Threads: o.Threads,
 	})
 	if err != nil {
 		return nil, err

@@ -548,6 +548,7 @@ func TestDecodeAllocs(t *testing.T) {
 		{"simple.webp", 100, func(b []byte) { Decode(bytes.NewReader(b)) }},
 		{"test.webp", 6, func(b []byte) { DecodeConfig(bytes.NewReader(b)) }},
 		{"anim.webp", 300, func(b []byte) { DecodeAll(bytes.NewReader(b)) }},
+		{"test.webp", 12, func(b []byte) { Decode(bytes.NewReader(b), Options{Threads: 3}) }},
 	}
 
 	for _, tt := range tests {

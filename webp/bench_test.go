@@ -129,18 +129,25 @@ func BenchmarkEncodeLossy(b *testing.B) {
 			b.Fatal(err)
 		}
 
-		b.Run(name, func(b *testing.B) {
-			r := img.Bounds()
-
-			b.SetBytes(int64(4 * r.Dx() * r.Dy()))
-			b.ReportAllocs()
-
-			for b.Loop() {
-				if err := Encode(io.Discard, img, Options{Quality: 75}); err != nil {
-					b.Fatal(err)
-				}
+		for _, n := range []int{1, 0} {
+			mode := "threaded"
+			if n == 1 {
+				mode = "serial"
 			}
-		})
+
+			b.Run(name+"/"+mode, func(b *testing.B) {
+				r := img.Bounds()
+
+				b.SetBytes(int64(4 * r.Dx() * r.Dy()))
+				b.ReportAllocs()
+
+				for b.Loop() {
+					if err := Encode(io.Discard, img, Options{Quality: 75, Threads: n}); err != nil {
+						b.Fatal(err)
+					}
+				}
+			})
+		}
 	}
 }
 

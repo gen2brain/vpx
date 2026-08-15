@@ -804,6 +804,8 @@ func TestEncodeAllocs(t *testing.T) {
 		{"lossy alpha", 0, func() { Encode(io.Discard, imgs["palette-64x48"], Options{Quality: 75}) }},
 		{"lossy 4:2:0 in", 0, func() { Encode(io.Discard, lossy, Options{Quality: 75}) }},
 		{"animation", 0, func() { EncodeAll(io.Discard, anim, Options{Quality: 75}) }},
+		// The one allocation is the token stage's goroutine, once per frame.
+		{"lossy threaded", 1, func() { Encode(io.Discard, lossy, Options{Quality: 75, Threads: 2}) }},
 	}
 
 	for _, tt := range tests {
@@ -922,4 +924,43 @@ func FuzzEncodeAll(f *testing.F) {
 			t.Fatalf("%d frames, want %d", len(got.Image), len(anim.Image))
 		}
 	})
+}
+
+// TestEncodeThreadsMatchSerial requires every thread count to encode to the
+// same bytes as Threads: 1, which the token stage running beside the macroblock
+// stage must not change.
+func TestEncodeThreadsMatchSerial(t *testing.T) {
+	names := []string{"test.webp", "simple-rgb.webp", "lossy_alpha.webp", "simple.webp", "anim.webp"}
+
+	for _, name := range names {
+		src, err := Decode(bytes.NewReader(readFile(t, name)))
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		for _, o := range []Options{{Quality: 75}, {Quality: 40}, {Quality: 95, Method: 6}, {Lossless: true}} {
+			o.Threads = 1
+
+			var want bytes.Buffer
+
+			if err := Encode(&want, src, o); err != nil {
+				t.Fatal(err)
+			}
+
+			for _, n := range []int{0, 2, 3, 8} {
+				o.Threads = n
+
+				var got bytes.Buffer
+
+				if err := Encode(&got, src, o); err != nil {
+					t.Fatal(err)
+				}
+
+				if !bytes.Equal(want.Bytes(), got.Bytes()) {
+					t.Fatalf("%s q%d lossless=%v: Threads %d gives %d bytes, serial gives %d",
+						name, o.Quality, o.Lossless, n, got.Len(), want.Len())
+				}
+			}
+		}
+	}
 }

@@ -190,3 +190,125 @@ func (d *Decoder) decodeFramePipelined() error {
 
 	return nil
 }
+
+type encPipeline struct {
+	rows [pipeDepth][]mbLevels
+	free chan int
+	tok  chan rowMsg
+	wg   sync.WaitGroup
+}
+
+func (e *Encoder) workers() int {
+	n := e.threads
+	if n == 0 {
+		n = runtime.GOMAXPROCS(0)
+	}
+
+	return max(n, 1)
+}
+
+func (e *Encoder) pipelined() bool {
+	return e.workers() > 1 && e.mbH >= pipeMinRows && e.mbW*e.mbH >= pipeMinMBs
+}
+
+func (e *Encoder) preparePipeline() *encPipeline {
+	p := e.pipe
+
+	if p == nil {
+		p = &encPipeline{
+			free: make(chan int, pipeDepth),
+			tok:  make(chan rowMsg, pipeDepth),
+		}
+
+		e.pipe = p
+	}
+
+	for i := range p.rows {
+		if cap(p.rows[i]) < e.mbW {
+			p.rows[i] = make([]mbLevels, e.mbW)
+		}
+
+		p.rows[i] = p.rows[i][:e.mbW]
+	}
+
+	for len(p.free) > 0 {
+		<-p.free
+	}
+
+	for len(p.tok) > 0 {
+		<-p.tok
+	}
+
+	for i := range pipeDepth {
+		p.free <- i
+	}
+
+	return p
+}
+
+// writeRows is the token stage. It owns tok and ctx, and reads only the levels
+// and the skip flags the macroblock stage produced.
+func (e *Encoder) writeRows(p *encPipeline) {
+	defer p.wg.Done()
+
+	for range e.mbH {
+		msg := <-p.tok
+		lv := p.rows[msg.slot]
+
+		e.ctx[0] = mbCtx{}
+
+		for mbX := range e.mbW {
+			e.writeMB(mbX, &lv[mbX], e.info[msg.row*e.mbW+mbX].skip)
+		}
+
+		p.free <- msg.slot
+	}
+}
+
+// encodeRows runs the macroblock stage on the caller and the token stage beside
+// it. The two never share state: the boolean encoder cannot be split, but it
+// does not have to wait for the mode search either.
+func (e *Encoder) encodeRows() {
+	if !e.pipelined() {
+		for mbY := range e.mbH {
+			e.rec.initScanline()
+			e.rec.initRowContext(mbY)
+
+			e.ctx[0] = mbCtx{}
+
+			for mbX := range e.mbW {
+				e.loadSource(mbX, mbY)
+				e.rec.loadNeighbours(mbX, mbY)
+				e.codeMB(mbX, mbY, &e.lv)
+				e.rec.reconstructMB(&e.rec.mb, mbX, mbY)
+			}
+		}
+
+		return
+	}
+
+	p := e.preparePipeline()
+
+	p.wg.Add(1)
+
+	go e.writeRows(p)
+
+	for mbY := range e.mbH {
+		slot := <-p.free
+		lv := p.rows[slot]
+
+		e.rec.initScanline()
+		e.rec.initRowContext(mbY)
+
+		for mbX := range e.mbW {
+			e.loadSource(mbX, mbY)
+			e.rec.loadNeighbours(mbX, mbY)
+			e.analyzeMB(mbX, mbY, &lv[mbX])
+			e.rec.reconstructMB(&e.rec.mb, mbX, mbY)
+		}
+
+		p.tok <- rowMsg{row: mbY, slot: slot}
+	}
+
+	p.wg.Wait()
+}

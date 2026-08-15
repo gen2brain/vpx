@@ -8,6 +8,10 @@ type EncodeOptions struct {
 	Quality int
 	// Method is the quality/speed trade-off in the range [0,6].
 	Method int
+	// Threads bounds the goroutines encoding one frame. Zero means GOMAXPROCS,
+	// one encodes serially. A frame is encoded as a macroblock stage and a
+	// token stage running concurrently, so nothing above two helps.
+	Threads int
 }
 
 const y2Block = 24
@@ -50,10 +54,11 @@ type Encoder struct {
 	tok boolEnc
 	out []byte
 
-	sc     [yuvSize]uint8
-	levels [y2Block + 1][16]int16
-	dc     [16]int16
-	nz     [y2Block + 1]int
+	sc      [yuvSize]uint8
+	lv      mbLevels
+	pipe    *encPipeline
+	threads int
+	dc      [16]int16
 }
 
 func qualityToQuant(quality int) int {
@@ -68,6 +73,7 @@ func qualityToQuant(quality int) int {
 }
 
 func (e *Encoder) setup(o EncodeOptions) {
+	e.threads = o.Threads
 	e.baseQ = qualityToQuant(o.Quality)
 
 	e.y1.q[0] = uint32(dcTable[e.baseQ])
@@ -214,7 +220,7 @@ func (e *Encoder) pickChromaMode(mbX, mbY int) uint8 {
 	return uint8(best)
 }
 
-func (e *Encoder) transformLuma(m *mbData) uint32 {
+func (e *Encoder) transformLuma(m *mbData, lv *mbLevels) uint32 {
 	b := e.rec.yuv[:]
 
 	for n := 0; n < 16; n += 2 {
@@ -223,9 +229,9 @@ func (e *Encoder) transformLuma(m *mbData) uint32 {
 
 	fTransformWHT(m.coeffs[:], e.dc[:])
 
-	e.nz[y2Block] = quantizeBlock(e.dc[:], e.levels[y2Block][:], &e.y2, 0)
+	lv.nz[y2Block] = quantizeBlock(e.dc[:], lv.levels[y2Block][:], &e.y2, 0)
 
-	if e.nz[y2Block] > 1 {
+	if lv.nz[y2Block] > 1 {
 		transformWHT(e.dc[:], m.coeffs[:])
 	} else {
 		dc0 := (e.dc[0] + 3) >> 3
@@ -240,14 +246,14 @@ func (e *Encoder) transformLuma(m *mbData) uint32 {
 	for n := range 16 {
 		blk := m.coeffs[16*n : 16*n+16]
 
-		e.nz[n] = quantizeBlock(blk, e.levels[n][:], &e.y1, 1)
-		bits = nzCodeBits(bits, e.nz[n], blk[0] != 0)
+		lv.nz[n] = quantizeBlock(blk, lv.levels[n][:], &e.y1, 1)
+		bits = nzCodeBits(bits, lv.nz[n], blk[0] != 0)
 	}
 
 	return bits
 }
 
-func (e *Encoder) transformChroma(m *mbData) uint32 {
+func (e *Encoder) transformChroma(m *mbData, lv *mbLevels) uint32 {
 	b := e.rec.yuv[:]
 	planes := [2]int{uOff, vOff}
 
@@ -263,8 +269,8 @@ func (e *Encoder) transformChroma(m *mbData) uint32 {
 
 			fTransform(e.sc[:], b, off, off, blk)
 
-			e.nz[n] = quantizeBlock(blk, e.levels[n][:], &e.uv, 0)
-			plane = nzCodeBits(plane, e.nz[n], blk[0] != 0)
+			lv.nz[n] = quantizeBlock(blk, lv.levels[n][:], &e.uv, 0)
+			plane = nzCodeBits(plane, lv.nz[n], blk[0] != 0)
 		}
 
 		bits |= plane << (8 * p)
@@ -273,7 +279,15 @@ func (e *Encoder) transformChroma(m *mbData) uint32 {
 	return bits
 }
 
-func (e *Encoder) codeMB(mbX, mbY int) {
+func (e *Encoder) codeMB(mbX, mbY int, lv *mbLevels) {
+	e.analyzeMB(mbX, mbY, lv)
+	e.writeMB(mbX, lv, e.info[mbY*e.mbW+mbX].skip)
+}
+
+// analyzeMB picks the modes, transforms and quantizes. It reconstructs through
+// e.rec and produces the levels the token writer consumes, touching nothing the
+// writer owns.
+func (e *Encoder) analyzeMB(mbX, mbY int, lv *mbLevels) {
 	m := &e.rec.mb
 
 	clear(m.coeffs[:])
@@ -281,18 +295,22 @@ func (e *Encoder) codeMB(mbX, mbY int) {
 	m.isI4x4 = false
 	m.segment = 0
 	m.imodes[0] = e.pickLumaMode(mbX, mbY)
-	m.nonZeroY = e.transformLuma(m)
+	m.nonZeroY = e.transformLuma(m, lv)
 
 	m.uvMode = e.pickChromaMode(mbX, mbY)
-	m.nonZeroUV = e.transformChroma(m)
+	m.nonZeroUV = e.transformChroma(m, lv)
 
-	skip := m.nonZeroY|m.nonZeroUV == 0 && e.nz[y2Block] == 0
+	skip := m.nonZeroY|m.nonZeroUV == 0 && lv.nz[y2Block] == 0
 
 	m.skip = skip
 	m.skipped = skip
 
 	e.info[mbY*e.mbW+mbX] = mbInfo{ymode: m.imodes[0], uvMode: m.uvMode, skip: skip}
+}
 
+// writeMB is the token stage. It owns tok and ctx, and reads only the levels
+// and the skip flag analyzeMB produced.
+func (e *Encoder) writeMB(mbX int, lv *mbLevels, skip bool) {
 	if skip {
 		e.ctx[1+mbX] = mbCtx{}
 		e.ctx[0] = mbCtx{}
@@ -300,7 +318,7 @@ func (e *Encoder) codeMB(mbX, mbY int) {
 		return
 	}
 
-	e.putResiduals(mbX)
+	e.putResiduals(mbX, lv)
 }
 
 func b2i(v bool) int {
@@ -432,15 +450,15 @@ func putCoeffs(w *boolEnc, bands *[17]*bandProbs, ctx, first int, levels []int16
 	}
 }
 
-func (e *Encoder) putResiduals(mbX int) {
+func (e *Encoder) putResiduals(mbX int, lv *mbLevels) {
 	w := &e.tok
 	top := &e.ctx[1+mbX]
 	left := &e.ctx[0]
 
-	putCoeffs(w, &e.proba.bandsPtr[1], int(top.nzDC)+int(left.nzDC), 0, e.levels[y2Block][:], e.nz[y2Block])
+	putCoeffs(w, &e.proba.bandsPtr[1], int(top.nzDC)+int(left.nzDC), 0, lv.levels[y2Block][:], lv.nz[y2Block])
 
 	nzDC := uint8(0)
-	if e.nz[y2Block] > 0 {
+	if lv.nz[y2Block] > 0 {
 		nzDC = 1
 	}
 
@@ -460,10 +478,10 @@ func (e *Encoder) putResiduals(mbX int) {
 		for range 4 {
 			ctx := int(l) + int(tnz&1)
 
-			putCoeffs(w, acBands, ctx, first, e.levels[n][:], e.nz[n])
+			putCoeffs(w, acBands, ctx, first, lv.levels[n][:], lv.nz[n])
 
 			l = 0
-			if e.nz[n] > first {
+			if lv.nz[n] > first {
 				l = 1
 			}
 
@@ -490,10 +508,10 @@ func (e *Encoder) putResiduals(mbX int) {
 			for range 2 {
 				ctx := int(l) + int(tnz&1)
 
-				putCoeffs(w, &e.proba.bandsPtr[2], ctx, 0, e.levels[n][:], e.nz[n])
+				putCoeffs(w, &e.proba.bandsPtr[2], ctx, 0, lv.levels[n][:], lv.nz[n])
 
 				l = 0
-				if e.nz[n] > 0 {
+				if lv.nz[n] > 0 {
 					l = 1
 				}
 
@@ -633,18 +651,7 @@ func (e *Encoder) Encode(src *Picture, o EncodeOptions) ([]byte, error) {
 
 	e.tok.init(e.tok.buf)
 
-	for mbY := range e.mbH {
-		e.rec.initScanline()
-		e.rec.initRowContext(mbY)
-		e.ctx[0] = mbCtx{}
-
-		for mbX := range e.mbW {
-			e.loadSource(mbX, mbY)
-			e.rec.loadNeighbours(mbX, mbY)
-			e.codeMB(mbX, mbY)
-			e.rec.reconstructMB(&e.rec.mb, mbX, mbY)
-		}
-	}
+	e.encodeRows()
 
 	tokens := e.tok.finish()
 
@@ -669,4 +676,9 @@ func (e *Encoder) Encode(src *Picture, o EncodeOptions) ([]byte, error) {
 	e.out = out
 
 	return out, nil
+}
+
+type mbLevels struct {
+	levels [y2Block + 1][16]int16
+	nz     [y2Block + 1]int
 }
