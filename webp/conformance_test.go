@@ -14,9 +14,6 @@ import (
 	"testing"
 )
 
-// The WebP corpora are large and live outside the repository. CONFORMANCE_DIR
-// is a colon separated list of them; the one holding a webp-conformance
-// checkout is the one these suites read.
 func conformanceDirs(t *testing.T) []string {
 	t.Helper()
 
@@ -42,10 +39,6 @@ func conformanceRoot(t *testing.T) string {
 	return ""
 }
 
-// corpusFiles is every still the suites read: the conformance corpus, plus the
-// tree tools/gencorpus.sh writes if one of the CONFORMANCE_DIR entries has it.
-// The corpus has few lossless, alpha and animated files, so the generated ones
-// are where most of the coverage for those comes from.
 func corpusFiles(t *testing.T) []string {
 	t.Helper()
 
@@ -68,8 +61,6 @@ func corpusFiles(t *testing.T) []string {
 	return names
 }
 
-// oracle is what webpinfo reports about a file. WEBPINFO_BIN overrides the
-// binary; the suites skip when it is not on PATH.
 type oracle struct {
 	width, height int
 	alpha         bool
@@ -93,9 +84,6 @@ func webpInfoBin(t *testing.T) string {
 	return path
 }
 
-// webpInfo runs webpinfo and reads back the fields DecodeConfig has to match.
-// The canvas size of an extended file wins over the bitstream dimensions,
-// which is what libwebp reports too.
 func webpInfo(bin, path string) (oracle, error) {
 	var o oracle
 
@@ -159,8 +147,6 @@ func dwebpBin(t *testing.T) string {
 	return path
 }
 
-// dwebpPAM decodes a file with libwebp and returns its RGBA samples, read back
-// out of the PAM header dwebp writes.
 func dwebpPAM(bin, path, out string) ([]byte, int, int, error) {
 	if err := exec.Command(bin, "-pam", "-o", out, path).Run(); err != nil {
 		return nil, 0, 0, err
@@ -206,8 +192,6 @@ func dwebpPAM(bin, path, out string) ([]byte, int, int, error) {
 	return b[end+len("ENDHDR\n"):], w, h, nil
 }
 
-// TestConformanceLossless decodes every VP8L file in the corpus and requires
-// the RGBA to match libwebp byte for byte. Set CONFORMANCE_DIR to run it.
 func TestConformanceLossless(t *testing.T) {
 	bin := dwebpBin(t)
 
@@ -298,9 +282,6 @@ func comparePixels(got, want []byte, w, h int) string {
 	return ""
 }
 
-// TestConformanceAlpha decodes every lossy file carrying an ALPH chunk and
-// requires the alpha plane to match libwebp byte for byte, which dwebp writes
-// as a fourth plane after the YUV ones. Set CONFORMANCE_DIR to run it.
 func TestConformanceAlpha(t *testing.T) {
 	bin := dwebpBin(t)
 
@@ -388,9 +369,6 @@ func comparePlaneBytes(got []byte, stride int, want []byte, w, h int) string {
 	return ""
 }
 
-// TestConformanceContainer parses every valid file and checks the container
-// against webpinfo: dimensions, the alpha and animation features, and the
-// frame count. Set CONFORMANCE_DIR to run it.
 func TestConformanceContainer(t *testing.T) {
 	bin := webpInfoBin(t)
 	files := corpusFiles(t)
@@ -462,9 +440,6 @@ func TestConformanceContainer(t *testing.T) {
 	}
 }
 
-// TestConformanceToRGBA decodes every still with Options{ToRGBA: true} and
-// requires it to match dwebp's RGBA, premultiplied as MODE_rgbA does. Set
-// CONFORMANCE_DIR to run it.
 func TestConformanceToRGBA(t *testing.T) {
 	bin := dwebpBin(t)
 
@@ -525,10 +500,6 @@ func TestConformanceToRGBA(t *testing.T) {
 	}
 }
 
-// TestConformanceToYCbCr decodes every lossless still with
-// Options{ToYCbCr: true} and requires the planes to match dwebp's MODE_YUVA,
-// which is the conversion the package this replaces gets. Set CONFORMANCE_DIR
-// to run it.
 func TestConformanceToYCbCr(t *testing.T) {
 	bin := dwebpBin(t)
 

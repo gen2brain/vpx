@@ -16,8 +16,6 @@ import (
 	"testing"
 )
 
-// The corpora are large and live outside the repository. CONFORMANCE_DIR is a
-// colon separated list of them.
 func corpusFiles(t *testing.T) []string {
 	t.Helper()
 
@@ -76,9 +74,6 @@ func webpInfoBin(t *testing.T) string {
 	return path
 }
 
-// lossyPayload returns the first VP8 chunk of a WebP file, and reports whether
-// the file has one at all. The container is walked here rather than through
-// the webp package, which imports this one.
 func lossyPayload(data []byte) ([]byte, bool) {
 	if len(data) < 12 || string(data[0:4]) != "RIFF" || string(data[8:12]) != "WEBP" {
 		return nil, false
@@ -111,8 +106,6 @@ func lossyPayload(data []byte) ([]byte, bool) {
 	return nil, false
 }
 
-// bitstream is the field dump webpinfo prints for a lossy frame, keyed by the
-// label it uses.
 type bitstream map[string]string
 
 func (b bitstream) num(t *testing.T, key string) int {
@@ -146,8 +139,6 @@ func (b bitstream) list(key string) []int {
 	return out
 }
 
-// webpInfoBitstream runs webpinfo and returns the fields of the first lossy
-// frame it dumps.
 func webpInfoBitstream(bin, path string) (bitstream, error) {
 	out, err := exec.Command(bin, "-bitstream_info", path).Output()
 	if err != nil {
@@ -186,9 +177,6 @@ func webpInfoBitstream(bin, path string) (bitstream, error) {
 	return fields, s.Err()
 }
 
-// TestConformanceHeader parses the frame header of every lossy file in the
-// corpus and compares each field against webpinfo. Set CONFORMANCE_DIR to run
-// it.
 func TestConformanceHeader(t *testing.T) {
 	bin := webpInfoBin(t)
 
@@ -260,8 +248,6 @@ func dwebpBin(t *testing.T) string {
 	return path
 }
 
-// dwebpYUV decodes a file with libwebp and returns its planes in the flat
-// layout dwebp writes: Y, then U, then V, each cropped to the visible size.
 func dwebpYUV(bin, path, out string) ([]byte, error) {
 	if err := exec.Command(bin, "-yuv", "-o", out, path).Run(); err != nil {
 		return nil, err
@@ -270,8 +256,6 @@ func dwebpYUV(bin, path, out string) ([]byte, error) {
 	return os.ReadFile(out)
 }
 
-// comparePlanes checks a decoded plane against the reference, row by row over
-// the visible region, and reports the first sample that differs.
 func comparePlanes(name string, got []byte, stride int, want []byte, w, h int) string {
 	for y := range h {
 		g := got[y*stride : y*stride+w]
@@ -287,8 +271,6 @@ func comparePlanes(name string, got []byte, stride int, want []byte, w, h int) s
 	return ""
 }
 
-// TestConformanceDecode decodes every lossy file in the corpus and requires
-// the planes to match libwebp byte for byte. Set CONFORMANCE_DIR to run it.
 func TestConformanceDecode(t *testing.T) {
 	bin := dwebpBin(t)
 
@@ -338,8 +320,6 @@ func TestConformanceDecode(t *testing.T) {
 		w, h := pic.Width, pic.Height
 		uvW, uvH := (w+1)/2, (h+1)/2
 
-		// A file with alpha gets a fourth plane appended, which this suite
-		// does not decode.
 		if size := w*h + 2*uvW*uvH; len(want) != size && len(want) != size+w*h {
 			t.Fatalf("%s: reference is %d bytes, want %d", name, len(want), size)
 		}
@@ -539,8 +519,6 @@ func ivfFrames(b []byte) ([][]byte, error) {
 	return frames, nil
 }
 
-// decodeIVF returns the md5 of every shown frame's I420 planes, which is what
-// vpxdec --i420 --md5 hashes.
 func decodeIVF(data []byte) (string, int, error) {
 	frames, err := ivfFrames(data)
 	if err != nil {
@@ -584,9 +562,6 @@ func decodeIVF(data []byte) (string, int, error) {
 	return hex.EncodeToString(h.Sum(nil)), shown, nil
 }
 
-// TestConformanceVideo decodes the VP8 test vectors, which are the streams the
-// format is defined by, and requires the md5 of every frame to match what
-// vpxdec produces. Set CONFORMANCE_DIR to run it.
 func TestConformanceVideo(t *testing.T) {
 	bin := vpxdecBin(t)
 
@@ -655,8 +630,6 @@ func TestConformanceVideo(t *testing.T) {
 	}
 }
 
-// BenchmarkDecodeVideo needs the test vectors, which live outside the
-// repository behind CONFORMANCE_DIR.
 func BenchmarkDecodeVideo(b *testing.B) {
 	var path string
 

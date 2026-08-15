@@ -6,9 +6,6 @@ import (
 	"testing"
 )
 
-// TestFDCTInverts requires the forward transform and the inverse the decoder
-// already has to agree on scaling: an unquantized round trip has to give the
-// residual back.
 func TestFDCTInverts(t *testing.T) {
 	rng := rand.New(rand.NewPCG(21, 22))
 

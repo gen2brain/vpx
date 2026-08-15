@@ -8,7 +8,6 @@ import (
 	"testing"
 )
 
-// keyFrame builds the uncompressed part of a key frame header.
 func keyFrame(profile, partSize, width, height, xscale, yscale int, show bool) []byte {
 	bits := uint32(partSize)<<5 | uint32(profile)<<1
 
@@ -69,9 +68,6 @@ func TestParseFrameHeader(t *testing.T) {
 	}
 }
 
-// An inter frame carries a frame tag and nothing else, which is what a caller
-// routing a stream reads. One that arrives before any key frame has nothing to
-// predict from.
 func TestParseFrameHeaderInter(t *testing.T) {
 	h, err := ParseFrameHeader(interFrame())
 	if err != nil {
@@ -115,8 +111,6 @@ func TestParseFrameHeaderInvalid(t *testing.T) {
 	zeroWidth := keyFrame(0, 42, 0, 16, 0, 0, true)
 	zeroHeight := keyFrame(0, 42, 16, 0, 0, 0, true)
 
-	// The profile field is three bits but only four values are defined, so the
-	// top bit set is a bitstream error rather than a feature.
 	badProfile := keyFrame(4, 42, 16, 16, 0, 0, true)
 
 	tests := []struct {
@@ -180,8 +174,6 @@ func interFrame() []byte {
 	return b
 }
 
-// decodeSurvives reports a panic as a message. Any error is fine; a panic on
-// untrusted input is not.
 func decodeSurvives(b []byte) (msg string) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -197,8 +189,6 @@ func decodeSurvives(b []byte) (msg string) {
 	return ""
 }
 
-// TestMalformedFrames truncates and corrupts every bundled frame. The decoder
-// is allowed to reject any of them and not to panic on any of them.
 func TestMalformedFrames(t *testing.T) {
 	names, err := filepath.Glob(filepath.Join("testdata", "*.vp8"))
 	if err != nil || len(names) == 0 {

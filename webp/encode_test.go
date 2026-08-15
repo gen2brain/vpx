@@ -118,10 +118,6 @@ func TestEncodeLosslessRoundTrip(t *testing.T) {
 	}
 }
 
-// TestEncodeLosslessAgainstDwebp encodes what the decoder read back and
-// requires libwebp to decode the result to the same pixels it reads from the
-// file it came from. The decoder is byte-exact against libwebp already, so the
-// two agreeing means the bitstream is valid and unambiguous.
 func TestEncodeLosslessAgainstDwebp(t *testing.T) {
 	bin := dwebpBin(t)
 
@@ -364,8 +360,6 @@ func histograms(rng *rand.Rand, size int) [][]uint32 {
 
 	out = append(out, flat)
 
-	// Fibonacci counts give the deepest tree a histogram can, so the depth
-	// limit has to bite.
 	deep := make([]uint32, size)
 	a, b := uint32(1), uint32(1)
 
@@ -611,10 +605,6 @@ func TestEncodeLossyRoundTrip(t *testing.T) {
 	}
 }
 
-// TestEncodeLossyAgainstDwebp requires libwebp and this decoder to read the
-// same pixels out of a file this encoder wrote. The decoder is byte-exact
-// against libwebp on the corpus, so the two agreeing means the bitstream says
-// one thing only.
 func TestEncodeLossyAgainstDwebp(t *testing.T) {
 	bin := dwebpBin(t)
 
@@ -720,9 +710,6 @@ func TestEncodeAnimation(t *testing.T) {
 	}
 }
 
-// TestEncodeAnimationAgainstLibwebp composites an animation this encoder wrote
-// with libwebp's demuxer and requires every frame to match what this package
-// composites. Set ANIMREF_BIN to run it.
 func TestEncodeAnimationAgainstLibwebp(t *testing.T) {
 	bin := animRefBin(t)
 
@@ -810,7 +797,6 @@ func TestEncodeAllocs(t *testing.T) {
 		{"lossy alpha", 0, func() { Encode(io.Discard, imgs["palette-64x48"], Options{Quality: 75}) }},
 		{"lossy 4:2:0 in", 0, func() { Encode(io.Discard, lossy, Options{Quality: 75}) }},
 		{"animation", 0, func() { EncodeAll(io.Discard, anim, Options{Quality: 75}) }},
-		// The one allocation is the token stage's goroutine, once per frame.
 		{"lossy threaded", 1, func() { Encode(io.Discard, lossy, Options{Quality: 75, Threads: 2}) }},
 		{"lossy i4x4", 0, func() { Encode(io.Discard, imgs["gradient-64x48"], Options{Quality: 75, Method: 4}) }},
 		{"lossy i4x4 512", 0, func() { Encode(io.Discard, lossy, Options{Quality: 75, Method: 4}) }},
@@ -934,9 +920,6 @@ func FuzzEncodeAll(f *testing.F) {
 	})
 }
 
-// TestEncodeThreadsMatchSerial requires every thread count to encode to the
-// same bytes as Threads: 1, which the token stage running beside the macroblock
-// stage must not change.
 func TestEncodeThreadsMatchSerial(t *testing.T) {
 	names := []string{"test.webp", "simple-rgb.webp", "lossy_alpha.webp", "simple.webp", "anim.webp"}
 

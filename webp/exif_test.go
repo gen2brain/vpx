@@ -56,7 +56,6 @@ func TestDecodeAutoRotate(t *testing.T) {
 		t.Errorf("plain decode = %dx%d, want 512x256", b.Dx(), b.Dy())
 	}
 
-	// Orientation 6 (rotate 90 CW) swaps width and height.
 	rot, err := Decode(bytes.NewReader(data), Options{AutoRotate: true})
 	if err != nil {
 		t.Fatal(err)

@@ -112,8 +112,6 @@ func blendRangeAtRow(src, dst frame, y int) (int, int, int, int) {
 	return left1, width1, left2, width2
 }
 
-// animScratch is the per-animation working set, sized once to the largest
-// frame and reused for every frame after it.
 type animScratch struct {
 	vp8      vp8.Decoder
 	lossless losslessDecoder

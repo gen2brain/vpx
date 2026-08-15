@@ -131,8 +131,6 @@ func (d *losslessDecoder) reset() {
 	d.arena.reset()
 }
 
-// release drops what the last decode held, so a pooled decoder keeps only the
-// pixel buffers it can reuse.
 func (d *losslessDecoder) release() {
 	d.reset()
 	d.br = lbitReader{}

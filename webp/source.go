@@ -41,8 +41,7 @@ func srcFor(r io.Reader) (*source, error) {
 	return memSource(data), nil
 }
 
-// header reads a fixed size field into the source's own scratch, so walking a
-// file costs no allocations. The result is only valid until the next call.
+// header returns a slice of the source's scratch, valid until the next call.
 func (s *source) header(off, n int) ([]byte, error) {
 	if s.r == nil || n > len(s.hdr) {
 		return s.at(off, n)

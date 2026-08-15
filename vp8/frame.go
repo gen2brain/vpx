@@ -303,9 +303,6 @@ func (d *Decoder) decodeFrame() error {
 	return nil
 }
 
-// DecodeFrame decodes one VP8 frame. The picture it returns is owned by the
-// decoder and is valid until the next call. A frame the stream marks as not
-// shown updates the references and returns a nil picture.
 func (d *Decoder) DecodeFrame(data []byte) (*Picture, error) {
 	if err := d.parseHeader(data); err != nil {
 		return nil, err

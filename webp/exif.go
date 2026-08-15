@@ -7,43 +7,34 @@ import (
 	"io"
 )
 
-// ErrNoExif is returned by DecodeExif when the WEBP has no EXIF chunk.
 var ErrNoExif = errors.New("webp: no exif data")
 
-// Exif holds the EXIF metadata decoded from a WEBP image.
 type Exif struct {
-	// Basic image info
 	Orientation int // EXIF orientation (1-8). 1 = normal, values 2-8 indicate rotation/flip.
 	Width       int // Image width in pixels.
 	Height      int // Image height in pixels.
 
-	// Camera info
 	Make     string // Camera manufacturer (e.g., "Canon").
 	Model    string // Camera model (e.g., "Canon EOS 5D Mark III").
 	Software string // Software used to process/create the image.
 
-	// Date/Time (format: "YYYY:MM:DD HH:MM:SS")
 	DateTime         string // File modification date/time.
 	DateTimeOriginal string // Original capture date/time (when photo was taken).
 
-	// Exposure settings
 	ExposureTime float64 // Shutter speed in seconds (e.g., 0.004 = 1/250s).
 	FNumber      float64 // Aperture f-number (e.g., 5.6 = f/5.6).
 	ISOSpeed     int     // ISO speed rating (e.g., 800).
 	FocalLength  float64 // Lens focal length in millimeters.
 	Flash        int     // Flash mode/status (0 = no flash, non-zero = flash fired).
 
-	// GPS location
 	GPSLatitude  float64 // Latitude in decimal degrees (positive = North, negative = South).
 	GPSLongitude float64 // Longitude in decimal degrees (positive = East, negative = West).
 	GPSAltitude  float64 // Altitude in meters above sea level.
 
-	// Copyright/Author
 	Copyright string // Copyright notice.
 	Artist    string // Creator/photographer name.
 }
 
-// DecodeExif reads the EXIF metadata from a WEBP image. It returns ErrNoExif if the image carries no EXIF chunk.
 func DecodeExif(r io.Reader) (*Exif, error) {
 	s, err := srcFor(r)
 	if err != nil {
@@ -68,8 +59,6 @@ func DecodeExif(r io.Reader) (*Exif, error) {
 	return exif, nil
 }
 
-// stripExifPrefix drops the JPEG style "Exif\0\0" header some encoders put in
-// front of the TIFF stream.
 func stripExifPrefix(b []byte) []byte {
 	if len(b) >= 6 && string(b[0:4]) == "Exif" && b[4] == 0 && b[5] == 0 {
 		return b[6:]
@@ -78,7 +67,6 @@ func stripExifPrefix(b []byte) []byte {
 	return b
 }
 
-// tiffOrientation returns the EXIF orientation (1-8) an EXIF chunk carries, or 1.
 func tiffOrientation(payload []byte) int {
 	if len(payload) == 0 {
 		return 1
@@ -92,7 +80,6 @@ func tiffOrientation(payload []byte) int {
 	return exif.Orientation
 }
 
-// orientTarget maps a source pixel to its destination for the given EXIF orientation.
 func orientTarget(orientation, sx, sy, sw, sh int) (int, int) {
 	switch orientation {
 	case 2: // flip horizontal
@@ -114,7 +101,6 @@ func orientTarget(orientation, sx, sy, sw, sh int) (int, int) {
 	return sx, sy
 }
 
-// applyOrientation returns img rotated/flipped per the EXIF orientation (unchanged for 1 or out of range).
 func applyOrientation(img image.Image, orientation int) image.Image {
 	if orientation <= 1 || orientation > 8 {
 		return img
@@ -153,9 +139,7 @@ func applyOrientation(img image.Image, orientation int) image.Image {
 	return dst
 }
 
-// EXIF tag constants
 const (
-	// Main IFD tags
 	tagOrientation    = 0x0112
 	tagImageWidth     = 0x0100
 	tagImageLength    = 0x0101
@@ -168,7 +152,6 @@ const (
 	tagExifIFDPointer = 0x8769
 	tagGPSIFDPointer  = 0x8825
 
-	// EXIF SubIFD tags
 	tagExposureTime     = 0x829A
 	tagFNumber          = 0x829D
 	tagISOSpeedRatings  = 0x8827
@@ -176,7 +159,6 @@ const (
 	tagFlash            = 0x9209
 	tagFocalLength      = 0x920A
 
-	// GPS SubIFD tags
 	tagGPSLatitudeRef  = 0x0001
 	tagGPSLatitude     = 0x0002
 	tagGPSLongitudeRef = 0x0003
@@ -185,7 +167,6 @@ const (
 	tagGPSAltitude     = 0x0006
 )
 
-// EXIF data type constants
 const (
 	typeUnsignedByte     = 1
 	typeASCIIString      = 2
@@ -201,7 +182,6 @@ const (
 	typeDoubleFloat      = 12
 )
 
-// exifReader wraps the EXIF data with helper functions for reading different data types
 type exifReader struct {
 	data         []byte
 	littleEndian bool
@@ -252,7 +232,6 @@ func (r *exifReader) readRational(offset int) float64 {
 	return float64(numerator) / float64(denominator)
 }
 
-// parseExifData parses the TIFF/EXIF data structure and populates the Exif struct
 func parseExifData(data []byte, exif *Exif) error {
 	if len(data) < 8 {
 		return fmt.Errorf("EXIF data too short")
@@ -260,7 +239,6 @@ func parseExifData(data []byte, exif *Exif) error {
 
 	reader := &exifReader{data: data}
 
-	// Check byte order
 	if data[0] == 0x49 && data[1] == 0x49 {
 		reader.littleEndian = true // Intel (little-endian)
 	} else if data[0] == 0x4D && data[1] == 0x4D {
@@ -269,26 +247,21 @@ func parseExifData(data []byte, exif *Exif) error {
 		return fmt.Errorf("invalid EXIF byte order marker")
 	}
 
-	// Check magic number (42)
 	if reader.uint16(2) != 42 {
 		return fmt.Errorf("invalid EXIF magic number")
 	}
 
-	// Get offset to first IFD
 	ifdOffset := reader.uint32(4)
 	if ifdOffset < 8 || int(ifdOffset) >= len(data) {
 		return fmt.Errorf("invalid IFD offset")
 	}
 
-	// Parse main IFD (IFD0)
 	exifIFDOffset, gpsIFDOffset := parseIFD(reader, int(ifdOffset), exif)
 
-	// Parse EXIF SubIFD if present
 	if exifIFDOffset > 0 {
 		parseExifSubIFD(reader, exifIFDOffset, exif)
 	}
 
-	// Parse GPS SubIFD if present
 	if gpsIFDOffset > 0 {
 		parseGPSSubIFD(reader, gpsIFDOffset, exif)
 	}
@@ -296,7 +269,6 @@ func parseExifData(data []byte, exif *Exif) error {
 	return nil
 }
 
-// parseIFD parses an Image File Directory and returns pointers to EXIF and GPS SubIFDs
 func parseIFD(reader *exifReader, offset int, exif *Exif) (exifIFDOffset, gpsIFDOffset int) {
 	if offset+1 >= len(reader.data) {
 		return 0, 0
@@ -316,7 +288,6 @@ func parseIFD(reader *exifReader, offset int, exif *Exif) (exifIFDOffset, gpsIFD
 		count := reader.uint32(entryOffset + 4)
 		valueOffset := entryOffset + 8
 
-		// For values > 4 bytes, the value field contains an offset
 		dataSize := getDataSize(dataType, count)
 		if dataSize > 4 {
 			valueOffset = int(reader.uint32(valueOffset))
@@ -380,7 +351,6 @@ func parseIFD(reader *exifReader, offset int, exif *Exif) (exifIFDOffset, gpsIFD
 	return exifIFDOffset, gpsIFDOffset
 }
 
-// parseExifSubIFD parses the EXIF SubIFD for camera settings
 func parseExifSubIFD(reader *exifReader, offset int, exif *Exif) {
 	if offset+1 >= len(reader.data) {
 		return
@@ -437,7 +407,6 @@ func parseExifSubIFD(reader *exifReader, offset int, exif *Exif) {
 	}
 }
 
-// parseGPSSubIFD parses the GPS SubIFD for location data
 func parseGPSSubIFD(reader *exifReader, offset int, exif *Exif) {
 	if offset+1 >= len(reader.data) {
 		return
@@ -496,7 +465,6 @@ func parseGPSSubIFD(reader *exifReader, offset int, exif *Exif) {
 		case tagGPSAltitude:
 			if dataType == typeUnsignedRational {
 				alt := reader.readRational(valueOffset)
-				// Check altitude reference (0 = above sea level, 1 = below)
 				if entryOffset+12 < len(reader.data) {
 					altRef := reader.data[valueOffset-4] // Previous tag should be altitude ref
 					if altRef == 1 {
@@ -508,7 +476,6 @@ func parseGPSSubIFD(reader *exifReader, offset int, exif *Exif) {
 		}
 	}
 
-	// Convert GPS coordinates from degrees/minutes/seconds to decimal degrees
 	if len(latValues) == 3 {
 		exif.GPSLatitude = latValues[0] + latValues[1]/60.0 + latValues[2]/3600.0
 		if latRef == "S" {
@@ -523,7 +490,6 @@ func parseGPSSubIFD(reader *exifReader, offset int, exif *Exif) {
 	}
 }
 
-// getDataSize calculates the size in bytes for a given EXIF data type and count
 func getDataSize(dataType uint16, count uint32) int {
 	var componentSize int
 	switch dataType {

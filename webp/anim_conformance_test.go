@@ -97,9 +97,6 @@ func readAnimRef(path string) (*animRef, error) {
 	return &a, nil
 }
 
-// TestConformanceAnimation composites every animation in the corpus and
-// requires each frame to match libwebp byte for byte. Set CONFORMANCE_DIR and
-// ANIMREF_BIN to run it.
 func TestConformanceAnimation(t *testing.T) {
 	bin := animRefBin(t)
 

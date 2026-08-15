@@ -137,8 +137,6 @@ func TestParseFrames(t *testing.T) {
 		}
 	}
 
-	// webpinfo reports the raw bit, where 1 means do not blend, so the first
-	// frame is the one that overwrites the canvas.
 	if c.frames[0].blend {
 		t.Error("frame 0 blends, want overwrite")
 	}
@@ -177,8 +175,6 @@ func TestParseInvalid(t *testing.T) {
 	}
 }
 
-// TestParseTruncated feeds every prefix of a file, which must be rejected or
-// parsed, never panic.
 func TestParseTruncated(t *testing.T) {
 	for _, name := range []string{"test.webp", "simple.webp", "anim.webp", "lossy_alpha.webp"} {
 		b := readFile(t, name)
@@ -189,8 +185,6 @@ func TestParseTruncated(t *testing.T) {
 	}
 }
 
-// TestParseChunkSizeOverflow gives a chunk a length that runs past the file,
-// which must not be read.
 func TestParseChunkSizeOverflow(t *testing.T) {
 	b := bytes.Clone(readFile(t, "lossy_alpha.webp"))
 	binary.LittleEndian.PutUint32(b[26:30], 0xfffffff0)
@@ -395,8 +389,6 @@ func TestDecodeConfig(t *testing.T) {
 	}
 }
 
-// countingReader serves a file through the interfaces srcFor looks for, and
-// counts the bytes it hands out.
 type countingReader struct {
 	r    *bytes.Reader
 	read int
@@ -415,9 +407,6 @@ func (c *countingReader) ReadAt(p []byte, off int64) (int, error) {
 	return n, err
 }
 
-// TestReadsLazily pins how much of a file each entry point has to touch. A
-// seekable reader is addressed by range, so the metadata a decode does not
-// need is never read.
 func TestReadsLazily(t *testing.T) {
 	const xmpSize = 2868
 
@@ -465,8 +454,6 @@ func TestReadsLazily(t *testing.T) {
 	}
 }
 
-// TestDecodeAllReadsOneFrame checks that Decode stops after the frame it
-// returns rather than decoding the whole animation.
 func TestDecodeAllReadsOneFrame(t *testing.T) {
 	b := readFile(t, "anim.webp")
 
@@ -530,9 +517,6 @@ func readFileBytes(name string) ([]byte, error) {
 	return os.ReadFile(filepath.Join("testdata", name))
 }
 
-// TestDecodeAllocs pins the allocation counts, which the reuse and pooling in
-// the decode path exist to keep down. The bounds are ceilings, not exact
-// counts: raise one only with a reason.
 func TestDecodeAllocs(t *testing.T) {
 	if raceEnabled {
 		t.Skip("the race detector allocates")
@@ -548,8 +532,6 @@ func TestDecodeAllocs(t *testing.T) {
 		{"simple.webp", 24, func(b []byte) { Decode(bytes.NewReader(b)) }},
 		{"test.webp", 6, func(b []byte) { DecodeConfig(bytes.NewReader(b)) }},
 		{"anim.webp", 220, func(b []byte) { DecodeAll(bytes.NewReader(b)) }},
-		// Two above the serial ceiling: the pipeline's goroutines, when the
-		// scheduler does not reuse their gs.
 		{"test.webp", 14, func(b []byte) { Decode(bytes.NewReader(b), Options{Threads: 3}) }},
 	}
 
@@ -569,8 +551,6 @@ func TestDecodeAllocs(t *testing.T) {
 	}
 }
 
-// fileSurvives reports a panic as a message. Any error is fine; a panic on
-// untrusted input is not.
 func fileSurvives(b []byte) (msg string) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -588,9 +568,6 @@ func fileSurvives(b []byte) (msg string) {
 	return ""
 }
 
-// TestMalformedFiles truncates and corrupts every bundled file, through every
-// entry point. The decoder is allowed to reject any of them and not to panic
-// on any of them.
 func TestMalformedFiles(t *testing.T) {
 	names, err := filepath.Glob(filepath.Join("testdata", "*.webp"))
 	if err != nil || len(names) == 0 {
@@ -613,8 +590,6 @@ func TestMalformedFiles(t *testing.T) {
 			}
 		}
 
-		// The offsets cover the RIFF header, the first chunk header, the
-		// bitstream header and a spread of payload.
 		for _, off := range []int{0, 4, 8, 12, 16, 20, 23, 29, 37, 101, 409, 1021, 4099} {
 			if off >= len(data) {
 				continue
@@ -702,9 +677,6 @@ func goldenHashThreads(data []byte, threads int) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-// TestGoldenDecode pins the decoded output of every bundled file so the noasm
-// and kernel builds are provably identical, not merely both right against
-// libwebp. Run it under -tags noasm as well.
 func TestGoldenDecode(t *testing.T) {
 	files, err := filepath.Glob(filepath.Join("testdata", "*.webp"))
 	if err != nil || len(files) == 0 {
@@ -738,8 +710,6 @@ func TestGoldenDecode(t *testing.T) {
 	}
 }
 
-// TestGoldenCorpus does the same over the external corpus, against a listing
-// written beside it on first run. Run once per build to compare them.
 func TestGoldenCorpus(t *testing.T) {
 	dir := os.Getenv("CONFORMANCE_DIR")
 	if dir == "" {
@@ -811,8 +781,6 @@ func TestGoldenCorpus(t *testing.T) {
 	}
 }
 
-// TestThreadsMatchSerial requires every thread count to decode to the same
-// bytes as Threads: 1, over the bundled files and the corpus when it is set.
 func TestThreadsMatchSerial(t *testing.T) {
 	files, err := filepath.Glob(filepath.Join("testdata", "*.webp"))
 	if err != nil {

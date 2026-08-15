@@ -7,9 +7,6 @@ import (
 	"github.com/gen2brain/vpx/vp8"
 )
 
-// still is the working set one still decode needs, pooled because none of it
-// survives the call: the planes and the lossless buffers are copied into the
-// image that is returned.
 type still struct {
 	vp8      vp8.Decoder
 	lossless losslessDecoder

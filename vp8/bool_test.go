@@ -5,9 +5,6 @@ import (
 	"testing"
 )
 
-// boolRef is the boolean decoder written the way RFC 6386 §7.3 spells it out,
-// a bit at a time with a sixteen bit window. It is the reference the packed
-// decoder is compared against.
 type boolRef struct {
 	buf   []byte
 	pos   int
@@ -86,10 +83,6 @@ func randomBuf(r *rand.Rand, n int) []byte {
 	return b
 }
 
-// TestBoolDecMatchesReference decodes the same buffer with the packed decoder
-// and the reference one, with the same probabilities, and requires every bit
-// to agree. The buffer is far larger than the decodes can consume, so neither
-// runs off the end.
 func TestBoolDecMatchesReference(t *testing.T) {
 	const (
 		size    = 4096
@@ -118,8 +111,6 @@ func TestBoolDecMatchesReference(t *testing.T) {
 	}
 }
 
-// TestBoolDecGetBits checks the multi-bit reads, which the frame header uses
-// for every literal field.
 func TestBoolDecGetBits(t *testing.T) {
 	for seed := range uint64(16) {
 		r := rand.New(rand.NewPCG(seed, 1))
@@ -143,9 +134,6 @@ func TestBoolDecGetBits(t *testing.T) {
 	}
 }
 
-// TestBoolDecGetSigned checks the folded sign read against the plain one. The
-// two decoders must stay in step, so the state is compared as well as the
-// values. One bit is read first because the folded form needs rng settled.
 func TestBoolDecGetSigned(t *testing.T) {
 	for seed := range uint64(16) {
 		r := rand.New(rand.NewPCG(seed, 2))
@@ -181,8 +169,6 @@ func TestBoolDecGetSigned(t *testing.T) {
 	}
 }
 
-// TestBoolDecTruncated runs a decoder off the end of every buffer length up to
-// a word, which must terminate rather than spin or read out of bounds.
 func TestBoolDecTruncated(t *testing.T) {
 	r := rand.New(rand.NewPCG(3, 4))
 
@@ -203,8 +189,6 @@ func TestBoolDecTruncated(t *testing.T) {
 	}
 }
 
-// TestBoolDecNoAlloc pins the decoder to zero allocations, which the frame
-// loop depends on.
 func TestBoolDecNoAlloc(t *testing.T) {
 	buf := randomBuf(rand.New(rand.NewPCG(5, 6)), 4096)
 
@@ -223,11 +207,7 @@ func TestBoolDecNoAlloc(t *testing.T) {
 	}
 }
 
-// TestBoolDecGetSignedUnsettled pins the one state the folded sign read is
-// wrong in, so that the precondition on it stays a fact rather than a hope.
 func TestBoolDecGetSignedUnsettled(t *testing.T) {
-	// A first byte below 128 takes the zero branch out of the initial range,
-	// which is the case the folded form does not renormalize.
 	buf := []byte{0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88}
 
 	var folded, plain boolDec
@@ -243,10 +223,6 @@ func TestBoolDecGetSignedUnsettled(t *testing.T) {
 	}
 }
 
-// skewedProbs draws from the coefficient probability table, so the branch in
-// getBit predicts about as well as it does on a real stream. Uniform random
-// probabilities make it mispredict on every call, which overstates the cost of
-// the branch by a factor that has already produced one wrong conclusion.
 func skewedProbs(r *rand.Rand, n int) []byte {
 	out := make([]byte, n)
 	for i := range out {
@@ -259,8 +235,6 @@ func skewedProbs(r *rand.Rand, n int) []byte {
 	return out
 }
 
-// BenchmarkBoolDecLoop is the control: the same loop with the decode taken
-// out, so the harness cost can be subtracted from BenchmarkBoolDecGetBit.
 func BenchmarkBoolDecLoop(b *testing.B) {
 	const run = 1 << 13
 
@@ -288,8 +262,6 @@ func BenchmarkBoolDecLoop(b *testing.B) {
 
 var boolSink int
 
-// BenchmarkBoolDecGetBit measures the steady state, re-initialising before the
-// decoder can run off the end and start measuring the eof path instead.
 func BenchmarkBoolDecGetBit(b *testing.B) {
 	const run = 1 << 13
 
@@ -311,8 +283,6 @@ func BenchmarkBoolDecGetBit(b *testing.B) {
 	}
 }
 
-// TestBoolEncRoundTrip requires the encoder and the decoder to agree bit for
-// bit on a sequence with realistic probabilities.
 func TestBoolEncRoundTrip(t *testing.T) {
 	rng := rand.New(rand.NewPCG(31, 32))
 
@@ -354,8 +324,6 @@ func TestBoolEncCarry(t *testing.T) {
 
 	e.init(nil)
 
-	// A long run of ones at a high probability is what makes the encoder hold
-	// bytes back for a carry.
 	for range 4096 {
 		e.putBit(1, 254)
 	}

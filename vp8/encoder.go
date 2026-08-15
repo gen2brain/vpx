@@ -7,10 +7,7 @@ type EncodeOptions struct {
 	// Quality in the range [0,100].
 	Quality int
 	// Method is the quality/speed trade-off in the range [0,6].
-	Method int
-	// Threads bounds the goroutines encoding one frame. Zero means GOMAXPROCS,
-	// one encodes serially. A frame is encoded as a macroblock stage and a
-	// token stage running concurrently, so nothing above two helps.
+	Method  int
 	Threads int
 }
 
@@ -306,9 +303,6 @@ func (e *Encoder) codeMB(mbX, mbY int, lv *mbLevels) {
 	e.writeMB(mbX, lv, e.info[mbY*e.mbW+mbX])
 }
 
-// analyzeMB picks the modes, transforms and quantizes. It reconstructs through
-// e.rec and produces the levels the token writer consumes, touching nothing the
-// writer owns.
 func (e *Encoder) analyzeMB(mbX, mbY int, lv *mbLevels) {
 	m := &e.rec.mb
 
@@ -430,8 +424,6 @@ func (e *Encoder) scoreIntra16(m *mbData, lv *mbLevels) int {
 	return 256*sse(e.sc[:], b, yOff, 16) + e.lambdaMode*rate
 }
 
-// writeMB is the token stage. It owns tok and ctx, and reads only the levels
-// and the skip flag analyzeMB produced.
 func (e *Encoder) writeMB(mbX int, lv *mbLevels, info mbInfo) {
 	if info.skip {
 		top := &e.ctx[1+mbX]
@@ -679,15 +671,11 @@ func (e *Encoder) skipProbability() {
 	e.skipProb = uint8((total - skips) * 255 / total)
 }
 
-// Release drops the encoder's reference to the picture it last encoded, so a
-// pooled encoder does not keep the caller's input alive.
 func (e *Encoder) Release() {
 	e.src = nil
 	e.out = e.out[:0]
 }
 
-// Encode writes src as a VP8 key frame. The bitstream it returns is owned by
-// the encoder and is valid until the next call.
 func (e *Encoder) Encode(src *Picture, o EncodeOptions) ([]byte, error) {
 	if src.Width <= 0 || src.Height <= 0 || src.Width >= maxDimension || src.Height >= maxDimension {
 		return nil, ErrInvalid

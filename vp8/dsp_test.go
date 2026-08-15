@@ -50,8 +50,6 @@ func (s *byteSource) fInfo() fInfo {
 	return f
 }
 
-// FuzzKernels drives every dispatched kernel against its scalar form on
-// fuzzer-chosen planes, sizes and filter parameters.
 func FuzzKernels(f *testing.F) {
 	f.Add(bytes.Repeat([]byte{0x80}, 512))
 	f.Add(bytes.Repeat([]byte{0x00}, 512))

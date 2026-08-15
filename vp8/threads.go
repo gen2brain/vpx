@@ -82,8 +82,6 @@ func (d *Decoder) preparePipeline() *pipeline {
 	return p
 }
 
-// parseRows is the entropy stage: the first partition for the modes, then the
-// row's token partition. It owns br, parts, mbCtx, intraT, intraL and modes.
 func (d *Decoder) parseRows(p *pipeline) {
 	defer p.wg.Done()
 
@@ -128,9 +126,6 @@ func (d *Decoder) parseRows(p *pipeline) {
 	}
 }
 
-// reconstructRows is the prediction stage. It owns yuv, mcTmp and topSamples,
-// and never reads the frame it is writing: intra prediction takes its
-// neighbours from topSamples, which are saved before the loop filter runs.
 func (d *Decoder) reconstructRows(p *pipeline) {
 	defer p.wg.Done()
 
@@ -155,9 +150,6 @@ func (d *Decoder) reconstructRows(p *pipeline) {
 	}
 }
 
-// decodeFramePipelined overlaps the three stages, which is all VP8 allows when
-// a stream carries one token partition: the tokens are then a single
-// sequential bitstream and no two macroblock rows can be read at once.
 func (d *Decoder) decodeFramePipelined() error {
 	p := d.preparePipeline()
 
@@ -246,8 +238,6 @@ func (e *Encoder) preparePipeline() *encPipeline {
 	return p
 }
 
-// writeRows is the token stage. It owns tok and ctx, and reads only the levels
-// and the skip flags the macroblock stage produced.
 func (e *Encoder) writeRows(p *encPipeline) {
 	defer p.wg.Done()
 
@@ -265,9 +255,6 @@ func (e *Encoder) writeRows(p *encPipeline) {
 	}
 }
 
-// encodeRows runs the macroblock stage on the caller and the token stage beside
-// it. The two never share state: the boolean encoder cannot be split, but it
-// does not have to wait for the mode search either.
 func (e *Encoder) encodeRows() {
 	if !e.pipelined() {
 		for mbY := range e.mbH {
