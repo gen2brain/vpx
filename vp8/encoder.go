@@ -28,6 +28,12 @@ type mbInfo struct {
 
 // Encoder encodes VP8 key frames. The zero value is ready to use, and reusing
 // one across frames reuses its buffers.
+const (
+	maxPartition0   = 1 << 19
+	maxI4HeaderBits = 256 * 16 * 16
+	minI4HeaderBits = 256
+)
+
 type Encoder struct {
 	rec   Decoder
 	proba proba
@@ -39,6 +45,9 @@ type Encoder struct {
 	y1, y2, uv qmatrix
 	lambdaMode int
 	lambdaUV   int
+
+	i4HeaderBits int
+	p0Limit      int
 
 	filterLevel int
 	useSkip     bool
@@ -101,6 +110,12 @@ func (e *Encoder) setup(o EncodeOptions) {
 
 	e.lambdaMode = qi4 * qi4 >> 7
 	e.lambdaUV = 3 * quv * quv >> 6
+
+	e.i4HeaderBits = maxI4HeaderBits
+
+	if e.p0Limit == 0 {
+		e.p0Limit = maxPartition0
+	}
 
 	qstep := int(acTable[e.baseQ]) >> 2
 	level := int(levelsFromDelta[0][min(qstep, len(levelsFromDelta[0])-1)]) * 300 / 256
@@ -313,12 +328,11 @@ func (e *Encoder) analyzeMB(mbX, mbY int, lv *mbLevels) {
 	i16 := e.lumaI16(mbX, mbY, m, lv)
 
 	if e.tryI4 {
-
 		e.saved.store(m, lv)
 
-		i4, bits := e.pickIntra4(mbX, mbY, m, lv)
+		limit := i16 + e.lambdaMode*(probCost(145, 1)-probCost(145, 0))
 
-		if i4+e.lambdaMode*probCost(145, 0) < i16+e.lambdaMode*probCost(145, 1) {
+		if i4, bits, ok := e.pickIntra4(mbX, mbY, m, lv, limit); ok && i4 < limit {
 			m.isI4x4 = true
 			m.nonZeroY = bits
 			lv.nz[y2Block] = 0
@@ -686,20 +700,38 @@ func (e *Encoder) Encode(src *Picture, o EncodeOptions) ([]byte, error) {
 	e.mbH = (src.Height + 15) / 16
 
 	e.setup(o)
-	e.alloc()
 
-	e.tokens.reset()
+	var header []byte
 
-	e.encodeRows()
+	for {
+		e.alloc()
+		e.proba.reset()
+		e.tokens.reset()
 
-	e.updateProbas()
-	e.skipProbability()
+		e.encodeRows()
 
-	e.hdr.init(e.hdr.buf)
-	e.putHeader()
-	e.putModes()
+		e.updateProbas()
+		e.skipProbability()
 
-	header := e.hdr.finish()
+		e.hdr.init(e.hdr.buf)
+		e.putHeader()
+		e.putModes()
+
+		header = e.hdr.finish()
+
+		if len(header) < e.p0Limit {
+			break
+		}
+
+		if !e.tryI4 {
+			return nil, ErrUnsupported
+		}
+
+		e.i4HeaderBits = min(e.i4HeaderBits>>1, 2048*(e.p0Limit*7/8)/(e.mbW*e.mbH))
+		if e.i4HeaderBits < minI4HeaderBits {
+			e.tryI4 = false
+		}
+	}
 
 	e.tok.init(e.tok.buf)
 	e.replayTokens()

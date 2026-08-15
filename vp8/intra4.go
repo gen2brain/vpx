@@ -151,7 +151,7 @@ func coeffCost(bands *[17]*bandProbs, ctx, first int, levels []int16, nz int) in
 	return cost
 }
 
-func (e *Encoder) pickIntra4(mbX, mbY int, m *mbData, lv *mbLevels) (int, uint32) {
+func (e *Encoder) pickIntra4(mbX, mbY int, m *mbData, lv *mbLevels, limit int) (int, uint32, bool) {
 	b := e.rec.yuv[:]
 
 	e.rec.fillTopRight(mbX, mbY)
@@ -163,6 +163,7 @@ func (e *Encoder) pickIntra4(mbX, mbY int, m *mbData, lv *mbLevels) (int, uint32
 	coeffs := &e.i4Coeffs
 
 	score := 0
+	header := 0
 	bits := uint32(0)
 
 	for n := range 16 {
@@ -212,8 +213,13 @@ func (e *Encoder) pickIntra4(mbX, mbY int, m *mbData, lv *mbLevels) (int, uint32
 		top[x] = uint8(bestMode)
 		left[y] = uint8(bestMode)
 
+		header += int(probs[bestMode])
 		score += bestScore
+
+		if header > e.i4HeaderBits || score >= limit {
+			return 0, 0, false
+		}
 	}
 
-	return score, bits
+	return score, bits, true
 }

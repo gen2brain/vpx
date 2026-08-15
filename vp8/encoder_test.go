@@ -148,3 +148,63 @@ func TestEncodeDecodeRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+func TestEncodePartition0Limit(t *testing.T) {
+	worst := 0
+
+	for a := range numBModes {
+		for b := range numBModes {
+			for m := range numBModes {
+				worst = max(worst, int(bModeCost[a][b][m]))
+			}
+		}
+	}
+
+	if 16*worst >= maxI4HeaderBits {
+		t.Fatalf("16 blocks of the costliest subblock mode is %d, at or over the cap %d", 16*worst, maxI4HeaderBits)
+	}
+
+	src := testPicture(160, 128)
+
+	var (
+		e    Encoder
+		d    Decoder
+		last int
+	)
+
+	for _, limit := range []int{maxPartition0, 4096, 2048, 1024, 512} {
+		e.p0Limit = limit
+
+		data, err := e.Encode(src, EncodeOptions{Quality: 80, Method: 4})
+		if err != nil {
+			t.Fatalf("limit %d: encode: %v", limit, err)
+		}
+
+		size := int(uint32(data[0])|uint32(data[1])<<8|uint32(data[2])<<16) >> 5
+
+		if size >= limit {
+			t.Fatalf("limit %d: partition 0 is %d bytes", limit, size)
+		}
+
+		pic, err := d.DecodeFrame(data)
+		if err != nil {
+			t.Fatalf("limit %d: decode: %v", limit, err)
+		}
+
+		if got := psnr(pic.Y, src.Y, pic.YStride, src.YStride, src.Width, src.Height); got < 25 {
+			t.Errorf("limit %d: luma PSNR %.1f dB, want at least 25", limit, got)
+		}
+
+		if last != 0 && size > last {
+			t.Errorf("limit %d: partition 0 grew from %d to %d", limit, last, size)
+		}
+
+		last = size
+	}
+
+	e.p0Limit = 64
+
+	if _, err := e.Encode(src, EncodeOptions{Quality: 80, Method: 4}); err != ErrUnsupported {
+		t.Fatalf("partition 0 that cannot fit: got %v, want ErrUnsupported", err)
+	}
+}
