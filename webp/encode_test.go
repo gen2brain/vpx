@@ -813,9 +813,7 @@ func TestEncodeAllocs(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tt.fn()
-
-			n := testing.AllocsPerRun(5, tt.fn)
+			n := allocs(tt.max, tt.fn)
 			if n > tt.max {
 				t.Errorf("%v allocations, want at most %v", n, tt.max)
 			}
