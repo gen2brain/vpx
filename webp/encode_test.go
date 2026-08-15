@@ -579,7 +579,7 @@ func TestEncodeLossyRoundTrip(t *testing.T) {
 			continue
 		}
 
-		for _, method := range []int{0, 4} {
+		for _, method := range []int{0, 4, 6} {
 			t.Run(fmt.Sprintf("%s/m%d", name, method), func(t *testing.T) {
 				last := 0.0
 
@@ -616,7 +616,7 @@ func TestEncodeLossyAgainstDwebp(t *testing.T) {
 	dir := t.TempDir()
 
 	for name, img := range testImages() {
-		for _, method := range []int{0, 4} {
+		for _, method := range []int{0, 4, 6} {
 			t.Run(fmt.Sprintf("%s/m%d", name, method), func(t *testing.T) {
 				var buf bytes.Buffer
 

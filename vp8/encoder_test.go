@@ -208,3 +208,71 @@ func TestEncodePartition0Limit(t *testing.T) {
 		t.Fatalf("partition 0 that cannot fit: got %v, want ErrUnsupported", err)
 	}
 }
+
+func TestLevelCostMatchesCoeffCost(t *testing.T) {
+	rng := rand.New(rand.NewPCG(51, 52))
+
+	var e Encoder
+
+	e.proba.reset()
+
+	for range 20000 {
+		var levels [16]int16
+
+		first := rng.IntN(2)
+		ty := rng.IntN(4)
+		ctx0 := rng.IntN(3)
+
+		nz := first + rng.IntN(17-first)
+
+		for n := first; n < nz; n++ {
+			switch rng.IntN(4) {
+			case 0:
+				levels[n] = 0
+			case 1:
+				levels[n] = int16(1 + rng.IntN(3))
+			default:
+				levels[n] = int16(1 + rng.IntN(200))
+			}
+
+			if rng.IntN(2) == 0 {
+				levels[n] = -levels[n]
+			}
+		}
+
+		if nz > first {
+			for levels[nz-1] == 0 {
+				levels[nz-1] = int16(1 + rng.IntN(9))
+			}
+		}
+
+		bands := &e.proba.bandsPtr[ty]
+		want := coeffCost(bands, ctx0, first, levels[:], nz)
+
+		got := 0
+		ctx := ctx0
+
+		if nz > first && ctx0 == 0 {
+			got += probCost(bands[first][0][0], 1)
+		}
+
+		for n := first; n < nz; n++ {
+			v := int(levels[n])
+			if v < 0 {
+				v = -v
+			}
+
+			got += levelCost(&bands[n][ctx], ctx, v)
+			ctx = min(v, 2)
+		}
+
+		if nz < 16 {
+			got += probCost(bands[nz][ctx][0], 0)
+		}
+
+		if got != want {
+			t.Fatalf("type %d first %d ctx %d nz %d: levelCost sums to %d, coeffCost is %d\n%v",
+				ty, first, ctx0, nz, got, want, levels)
+		}
+	}
+}

@@ -166,6 +166,8 @@ func (e *Encoder) pickIntra4(mbX, mbY int, m *mbData, lv *mbLevels, limit int) (
 	header := 0
 	bits := uint32(0)
 
+	var tnz, lnz [4]int
+
 	for n := range 16 {
 		off := yOff + scan[n]
 		x, y := n&3, n>>2
@@ -201,6 +203,18 @@ func (e *Encoder) pickIntra4(mbX, mbY int, m *mbData, lv *mbLevels, limit int) (
 		}
 
 		predLuma4[bestMode](b, off)
+
+		if e.trellis {
+			fTransform(e.sc[:], b, off, off, coeffs[:])
+
+			bestNz = e.trellisQuantize(coeffs[:], levels[:], &e.y1, 3, tnz[x]+lnz[y], 0, e.lambdaTrellisI4)
+
+			copy(m.coeffs[16*n:16*n+16], coeffs[:])
+			copy(lv.levels[n][:], levels[:])
+		}
+
+		tnz[x] = b2i(bestNz > 0)
+		lnz[y] = tnz[x]
 
 		if bestNz > 0 {
 			transformOne(m.coeffs[16*n:16*n+16], b, off)

@@ -46,6 +46,9 @@ type Encoder struct {
 	lambdaMode int
 	lambdaUV   int
 
+	lambdaTrellisI4  int
+	lambdaTrellisI16 int
+
 	i4HeaderBits int
 	p0Limit      int
 
@@ -69,6 +72,7 @@ type Encoder struct {
 	leftB     [4]uint8
 	tryI4     bool
 	rdUV      bool
+	trellis   bool
 	tokens    tokenBuf
 	probaNew  [numSlots]uint8
 	probaFlat [numSlots]uint8
@@ -97,6 +101,7 @@ func (e *Encoder) setup(o EncodeOptions) {
 	e.tryI4 = o.Method >= 3
 	e.rdUV = o.Method >= 5
 	e.rdI16 = o.Method >= 5
+	e.trellis = o.Method >= 5
 	e.baseQ = qualityToQuant(o.Quality)
 
 	e.y1.q[0] = uint32(dcTable[e.baseQ])
@@ -108,11 +113,13 @@ func (e *Encoder) setup(o EncodeOptions) {
 
 	qi4 := e.y1.expand(0)
 	quv := e.uv.expand(2)
-
-	e.y2.expand(1)
+	qi16 := e.y2.expand(1)
 
 	e.lambdaMode = qi4 * qi4 >> 7
 	e.lambdaUV = 3 * quv * quv >> 6
+
+	e.lambdaTrellisI4 = max(7*qi4*qi4>>4, 1)
+	e.lambdaTrellisI16 = max(qi16*qi16>>3, 1)
 
 	e.i4HeaderBits = maxI4HeaderBits
 
@@ -304,7 +311,7 @@ func (e *Encoder) pickChromaMode(mbX, mbY int, m *mbData, lv *mbLevels) (uint8, 
 	return uint8(best), e.savedUV.restore(m, lv)
 }
 
-func (e *Encoder) transformLuma(m *mbData, lv *mbLevels) uint32 {
+func (e *Encoder) transformLuma(m *mbData, lv *mbLevels, trellis bool) uint32 {
 	b := e.rec.yuv[:]
 
 	for n := 0; n < 16; n += 2 {
@@ -327,10 +334,22 @@ func (e *Encoder) transformLuma(m *mbData, lv *mbLevels) uint32 {
 
 	bits := uint32(0)
 
+	var tnz, lnz [4]int
+
 	for n := range 16 {
 		blk := m.coeffs[16*n : 16*n+16]
 
-		lv.nz[n] = quantizeBlock(blk, lv.levels[n][:], &e.y1, 1)
+		if trellis {
+			x, y := n&3, n>>2
+
+			lv.nz[n] = e.trellisQuantize(blk, lv.levels[n][:], &e.y1, 0, tnz[x]+lnz[y], 1, e.lambdaTrellisI16)
+
+			tnz[x] = b2i(lv.nz[n] > 1)
+			lnz[y] = tnz[x]
+		} else {
+			lv.nz[n] = quantizeBlock(blk, lv.levels[n][:], &e.y1, 1)
+		}
+
 		bits = nzCodeBits(bits, lv.nz[n], blk[0] != 0)
 	}
 
@@ -397,6 +416,11 @@ func (e *Encoder) analyzeMB(mbX, mbY int, lv *mbLevels) {
 		for i := range 4 {
 			top[i] = m.imodes[0]
 			e.leftB[i] = m.imodes[0]
+		}
+
+		if e.trellis {
+			predLuma16[checkMode(mbX, mbY, int(m.imodes[0]))](e.rec.yuv[:], yOff)
+			m.nonZeroY = e.transformLuma(m, lv, true)
 		}
 	}
 
@@ -465,7 +489,7 @@ func (s *i16State) restore(m *mbData, lv *mbLevels) {
 func (e *Encoder) lumaI16(mbX, mbY int, m *mbData, lv *mbLevels) int {
 	if !e.rdI16 {
 		m.imodes[0] = e.pickLumaMode(mbX, mbY)
-		m.nonZeroY = e.transformLuma(m, lv)
+		m.nonZeroY = e.transformLuma(m, lv, false)
 
 		return e.scoreIntra16(m, lv)
 	}
@@ -477,7 +501,7 @@ func (e *Encoder) lumaI16(mbX, mbY int, m *mbData, lv *mbLevels) int {
 		predLuma16[checkMode(mbX, mbY, mode)](b, yOff)
 
 		m.imodes[0] = uint8(mode)
-		m.nonZeroY = e.transformLuma(m, lv)
+		m.nonZeroY = e.transformLuma(m, lv, false)
 
 		if s := e.scoreIntra16(m, lv); s < best {
 			best = s
