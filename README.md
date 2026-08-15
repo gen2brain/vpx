@@ -51,17 +51,11 @@ There is no container that carries an inter frame yet, so a video stream needs a
 Lossy (VP8) and lossless (VP8L) still images, alpha in both, animation with its disposal and blending, and the `VP8X`
 extended container with its ICC, Exif and XMP chunks. The encoder writes all of those, plus VP8 video. Every path is
 checked against the reference: stills decode byte-exactly against libwebp and libwebp reads back every one this package
-writes, all 61 VP8 test vector streams decode to the bytes `vpxdec` produces, and libvpx decodes the encoded video
+writes, all VP8 test vector streams decode to the bytes `vpxdec` produces, and libvpx decodes the encoded video
 bit-exactly.
 
-At equal luma PSNR on photographs a lossy still is 2% to 15% smaller than `cwebp -m 4`, or 0.3% to 12.2% against
-`cwebp -m 4 -sns 0`; the gap between those two is libwebp's spatial noise shaping, which PSNR charges it for. Lossless
-is within 1.5% of `cwebp -lossless -m 4` on a photograph and 1.9% smaller on a two-colour image, and inter frames are
-up to 5x smaller than coding every frame as a key frame.
-
-Decoding is 1.09x to 1.21x slower than libwebp and lossy encoding 1.11x slower; lossless encoding is faster, by 1.07x
-and 1.9x on the two files measured. Threading is a three stage pipeline over macroblock rows, worth 1.41x on a 1080p
-still and 1.55x on a lossy encode, and every encode path allocates nothing per call.
+Decoding is 1.09x to 1.21x slower than libwebp and lossy encoding 1.11x slower; lossless encoding is faster, by 1.07x and 1.9x on the two files measured.
+Threading worth 1.41x on a 1080p still and 1.55x on a lossy encode, and every encode path allocates nothing per call.
 
 ### License
 
