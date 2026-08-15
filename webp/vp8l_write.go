@@ -95,6 +95,21 @@ type losslessEncoder struct {
 	modes   []uint32
 	rows    []uint32
 	out     []byte
+
+	blocks     []histogram
+	blockCosts []float64
+	blockBins  []int
+	blockGroup []int
+	groupHist  []histogram
+	groupCodes [][treesPerGroup]huffCode
+	mergeHist  histogram
+	groupCost  []float64
+	pairCost   []float64
+	meta       []uint32
+	topRefs    []ref
+
+	method     int
+	palettized bool
 }
 
 func (e *losslessEncoder) release() {
@@ -114,13 +129,15 @@ func (e *losslessEncoder) alphabets(cacheBits uint) [treesPerGroup]int {
 }
 
 func (e *losslessEncoder) buildCodes(cacheBits uint) {
+	e.buildCodesFrom(&e.hist, &e.codes, cacheBits)
+}
+
+func (e *losslessEncoder) buildCodesFrom(h *histogram, codes *[treesPerGroup]huffCode, cacheBits uint) {
 	sizes := e.alphabets(cacheBits)
-	hists := [treesPerGroup][]uint32{
-		e.hist.literal, e.hist.red[:], e.hist.blue[:], e.hist.alpha[:], e.hist.dist[:],
-	}
+	hists := h.planes()
 
 	for i, n := range sizes {
-		c := &e.codes[i]
+		c := &codes[i]
 
 		if cap(c.lengths) < n {
 			c.lengths = make([]uint8, n)
@@ -134,9 +151,13 @@ func (e *losslessEncoder) buildCodes(cacheBits uint) {
 }
 
 func (e *losslessEncoder) storeCodes(w *lbitWriter) {
-	for i := range e.codes {
-		e.builder.storeCode(w, &e.codes[i])
-		clearIfSingle(&e.codes[i])
+	e.storeCodesFrom(w, &e.codes)
+}
+
+func (e *losslessEncoder) storeCodesFrom(w *lbitWriter, codes *[treesPerGroup]huffCode) {
+	for i := range codes {
+		e.builder.storeCode(w, &codes[i])
+		clearIfSingle(&codes[i])
 	}
 }
 
@@ -144,26 +165,44 @@ func writeSymbol(w *lbitWriter, c *huffCode, s int) {
 	w.write(uint32(c.codes[s]), uint(c.lengths[s]))
 }
 
+func writeRef(w *lbitWriter, codes *[treesPerGroup]huffCode, r ref, xsize int) {
+	switch r.mode {
+	case refLiteral:
+		writeSymbol(w, &codes[greenTree], int(r.value>>8&0xff))
+		writeSymbol(w, &codes[redTree], int(r.value>>16&0xff))
+		writeSymbol(w, &codes[blueTree], int(r.value&0xff))
+		writeSymbol(w, &codes[alphaTree], int(r.value>>24))
+	case refCache:
+		writeSymbol(w, &codes[greenTree], numLiteralCodes+numLengthCodes+int(r.value))
+	default:
+		code, n, extra := prefixEncode(int(r.len))
+
+		writeSymbol(w, &codes[greenTree], numLiteralCodes+code)
+		w.write(extra, n)
+
+		code, n, extra = prefixEncode(distanceToPlaneCode(xsize, int(r.value)))
+
+		writeSymbol(w, &codes[distTree], code)
+		w.write(extra, n)
+	}
+}
+
 func (e *losslessEncoder) storeImage(w *lbitWriter, refs []ref, xsize int) {
 	for _, r := range refs {
-		switch r.mode {
-		case refLiteral:
-			writeSymbol(w, &e.codes[greenTree], int(r.value>>8&0xff))
-			writeSymbol(w, &e.codes[redTree], int(r.value>>16&0xff))
-			writeSymbol(w, &e.codes[blueTree], int(r.value&0xff))
-			writeSymbol(w, &e.codes[alphaTree], int(r.value>>24))
-		case refCache:
-			writeSymbol(w, &e.codes[greenTree], numLiteralCodes+numLengthCodes+int(r.value))
-		default:
-			code, n, extra := prefixEncode(int(r.len))
+		writeRef(w, &e.codes, r, xsize)
+	}
+}
 
-			writeSymbol(w, &e.codes[greenTree], numLiteralCodes+code)
-			w.write(extra, n)
+func (e *losslessEncoder) storeMetaImage(w *lbitWriter, refs []ref, xsize, mw int, bits uint) {
+	x, y := 0, 0
 
-			code, n, extra = prefixEncode(distanceToPlaneCode(xsize, int(r.value)))
+	for _, r := range refs {
+		writeRef(w, &e.groupCodes[e.blockGroup[(y>>bits)*mw+(x>>bits)]], r, xsize)
 
-			writeSymbol(w, &e.codes[distTree], code)
-			w.write(extra, n)
+		x += int(r.len)
+		for x >= xsize {
+			x -= xsize
+			y++
 		}
 	}
 }
@@ -186,9 +225,7 @@ func refsExtraBits(refs []ref, xsize int) int {
 }
 
 func (e *losslessEncoder) codeCost() int {
-	hists := [treesPerGroup][]uint32{
-		e.hist.literal, e.hist.red[:], e.hist.blue[:], e.hist.alpha[:], e.hist.dist[:],
-	}
+	hists := e.hist.planes()
 
 	cost := 0
 
@@ -310,6 +347,35 @@ func (e *losslessEncoder) encodeImage(w *lbitWriter, argb []uint32, xsize, quali
 		w.write(0, 1)
 	}
 
+	if top && !lowEffort {
+		ysize := (len(argb) + xsize - 1) / xsize
+
+		if bits, mw, groups := e.metaGroups(refs, xsize, ysize, cacheBits); groups > 1 {
+			e.topRefs = append(e.topRefs[:0], refs...)
+
+			mh := subSampleSize(ysize, int(bits))
+
+			mark := w.mark()
+			e.writeGroups(w, xsize, mw, mh, bits, groups, cacheBits, quality)
+			meta := w.count(mark)
+
+			w.restore(mark)
+			e.writeSingle(w, e.topRefs, xsize, cacheBits, true)
+			single := w.count(mark)
+
+			if meta < single {
+				w.restore(mark)
+				e.writeGroups(w, xsize, mw, mh, bits, groups, cacheBits, quality)
+			}
+
+			return
+		}
+	}
+
+	e.writeSingle(w, refs, xsize, cacheBits, top)
+}
+
+func (e *losslessEncoder) writeSingle(w *lbitWriter, refs []ref, xsize int, cacheBits uint, top bool) {
 	if top {
 		w.write(0, 1)
 	}
@@ -319,6 +385,16 @@ func (e *losslessEncoder) encodeImage(w *lbitWriter, argb []uint32, xsize, quali
 	e.buildCodes(cacheBits)
 	e.storeCodes(w)
 	e.storeImage(w, refs, xsize)
+}
+
+func (e *losslessEncoder) writeGroups(w *lbitWriter, xsize, mw, mh int, bits uint, groups int, cacheBits uint, quality int) {
+	w.write(1, 1)
+	w.write(uint32(bits-2), 3)
+
+	e.encodeImage(w, e.metaImage(mw*mh), mw, quality, false, false)
+
+	e.storeGroupCodes(w, groups, cacheBits)
+	e.storeMetaImage(w, e.topRefs, xsize, mw, bits)
 }
 
 func putTransform(w *lbitWriter, kind int) {
@@ -373,10 +449,15 @@ func (e *losslessEncoder) encodeStream(w *lbitWriter, argb []uint32, width, heig
 	lowEffort := o.Method == 0
 	xsize := width
 
+	e.method = o.Method
+	e.palettized = false
+
 	palette, usePalette := e.pmap.build(argb, e.palette)
 	e.palette = palette
 
 	if usePalette {
+		e.palettized = true
+
 		bits := paletteBits(len(palette))
 
 		putTransform(w, colorIndexingTransform)

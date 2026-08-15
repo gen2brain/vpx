@@ -25,6 +25,26 @@ func (w *lbitWriter) write(v uint32, n uint) {
 	w.n += n
 }
 
+type writerMark struct {
+	n    int
+	bits uint64
+	k    uint
+}
+
+func (w *lbitWriter) mark() writerMark {
+	return writerMark{n: len(w.buf), bits: w.bits, k: w.n}
+}
+
+func (w *lbitWriter) restore(m writerMark) {
+	w.buf = w.buf[:m.n]
+	w.bits = m.bits
+	w.n = m.k
+}
+
+func (w *lbitWriter) count(m writerMark) int {
+	return 8*(len(w.buf)-m.n) + int(w.n) - int(m.k)
+}
+
 func (w *lbitWriter) flush() []byte {
 	for w.n > 0 {
 		w.buf = append(w.buf, byte(w.bits))
