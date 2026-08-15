@@ -209,30 +209,86 @@ func applyColorIndexing(px, out []uint32, width, height, bits int, table []uint3
 	}
 
 	packedWidth := subSampleSize(width, bits)
-	bitsPerPixel := uint(8 >> bits)
-	perByte := 1 << bits
-	bitMask := uint32(1)<<bitsPerPixel - 1
-	t := table[:bitMask+1]
 
-	for y := range height {
-		src := y * packedWidth
-		dst := y * width
+	row := func(y int) []uint32 { return out[y*width : y*width+width] }
+	packed := func(y int) []uint32 { return px[y*packedWidth : y*packedWidth+packedWidth] }
 
-		for x := 0; x < width; {
-			packed := px[src] >> 8 & 0xff
-			src++
+	switch bits {
+	case 3:
+		var exp [256][8]uint32
 
-			n := min(perByte, width-x)
-			row := out[dst+x : dst+x+n]
+		t := table[:2]
 
-			for k := range row {
-				row[k] = t[packed&bitMask]
-				packed >>= bitsPerPixel
+		for i := range exp {
+			for k := range exp[i] {
+				exp[i][k] = t[i>>k&1]
 			}
+		}
 
-			x += n
+		for y := range height {
+			expandIndex8(row(y), packed(y), &exp, t)
+		}
+	case 2:
+		var exp [256][4]uint32
+
+		t := table[:4]
+
+		for i := range exp {
+			for k := range exp[i] {
+				exp[i][k] = t[i>>(2*k)&3]
+			}
+		}
+
+		for y := range height {
+			expandIndex4(row(y), packed(y), &exp, t)
+		}
+	default:
+		var exp [256][2]uint32
+
+		t := table[:16]
+
+		for i := range exp {
+			exp[i][0] = t[i&15]
+			exp[i][1] = t[i>>4]
+		}
+
+		for y := range height {
+			expandIndex2(row(y), packed(y), &exp, t)
 		}
 	}
 
 	return out
+}
+
+func expandIndex8(row, src []uint32, exp *[256][8]uint32, t []uint32) {
+	x := 0
+	for ; x+8 <= len(row); x += 8 {
+		*(*[8]uint32)(row[x:]) = exp[src[x>>3]>>8&0xff]
+	}
+
+	for ; x < len(row); x++ {
+		row[x] = t[src[x>>3]>>8>>(x&7)&1]
+	}
+}
+
+func expandIndex4(row, src []uint32, exp *[256][4]uint32, t []uint32) {
+	x := 0
+	for ; x+4 <= len(row); x += 4 {
+		*(*[4]uint32)(row[x:]) = exp[src[x>>2]>>8&0xff]
+	}
+
+	for ; x < len(row); x++ {
+		row[x] = t[src[x>>2]>>8>>(2*(x&3))&3]
+	}
+}
+
+func expandIndex2(row, src []uint32, exp *[256][2]uint32, t []uint32) {
+	x := 0
+	for ; x+2 <= len(row); x += 2 {
+		*(*[2]uint32)(row[x:]) = exp[src[x>>1]>>8&0xff]
+	}
+
+	if x < len(row) {
+		row[x] = t[src[x>>1]>>8&15]
+	}
 }

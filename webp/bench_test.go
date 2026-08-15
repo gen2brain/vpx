@@ -21,7 +21,7 @@ func benchFile(b *testing.B, name string) []byte {
 }
 
 func BenchmarkDecode(b *testing.B) {
-	for _, name := range []string{"test.webp", "simple-rgb.webp", "lossy_alpha.webp", "simple.webp", "palette.webp"} {
+	for _, name := range []string{"test.webp", "simple-rgb.webp", "lossy_alpha.webp", "simple.webp", "palette.webp", "2-color.webp"} {
 		data := benchFile(b, name)
 
 		b.Run(name, func(b *testing.B) {
@@ -188,5 +188,33 @@ func BenchmarkDecodeAll(b *testing.B) {
 		if _, err := DecodeAll(bytes.NewReader(data)); err != nil {
 			b.Fatal(err)
 		}
+	}
+}
+
+func BenchmarkColorIndexing(b *testing.B) {
+	const w, h = 640, 480
+
+	for _, bits := range []int{0, 1, 2, 3} {
+		packedWidth := subSampleSize(w, bits)
+		px := make([]uint32, packedWidth*h)
+
+		for i := range px {
+			px[i] = uint32(i) * 2654435761 & 0xff00
+		}
+
+		table := make([]uint32, 1<<(8>>bits))
+		for i := range table {
+			table[i] = uint32(i) * 0x01010101
+		}
+
+		out := make([]uint32, w*h)
+
+		b.Run(fmt.Sprint(bits), func(b *testing.B) {
+			b.SetBytes(4 * w * h)
+
+			for b.Loop() {
+				applyColorIndexing(px, out, w, h, bits, table)
+			}
+		})
 	}
 }

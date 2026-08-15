@@ -235,7 +235,12 @@ func TestResidualImage(t *testing.T) {
 func TestPaletteForward(t *testing.T) {
 	rng := rand.New(rand.NewPCG(15, 16))
 
-	for _, size := range []image.Point{{X: 1, Y: 1}, {X: 1, Y: 9}, {X: 9, Y: 1}, {X: 7, Y: 5}, {X: 40, Y: 33}} {
+	sizes := []image.Point{{X: 1, Y: 1}, {X: 1, Y: 9}, {X: 9, Y: 1}, {X: 7, Y: 5}, {X: 40, Y: 33}}
+	for w := 2; w <= 20; w++ {
+		sizes = append(sizes, image.Point{X: w, Y: 3})
+	}
+
+	for _, size := range sizes {
 		for _, colors := range []int{2, 3, 5, 17, 200} {
 			px := randomImage(rng, size.X, size.Y, colors)
 			want := slices.Clone(px)
