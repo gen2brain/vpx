@@ -2,15 +2,37 @@ package webp
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"image"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
+	"strings"
 	"testing"
 )
+
+var goldenDecode = map[string]string{
+	"2-color.webp":        "8b3be1f343a72dbedd1e0a743d8c77db6bf02ad94a542cbfa05493e08218cddf",
+	"anim-dispose.webp":   "5fb6678860f6d1c18b853c70c0b3542ab465c3c6e2c146d28e695595a6eac6d8",
+	"anim-small.webp":     "686210527b22950ed84cd253caf700f2c125104ec92c5ff3a4c2b384c09134c3",
+	"anim.webp":           "3e5a49628493b095d640d8ec5f0cda567e545a2067deccd8db5e19632b14a16a",
+	"exif.webp":           "03e32d66b2c05372a0a4bbfb4079ae973f987464f2e24d20dfac2b94c2e90f33",
+	"lossless_alpha.webp": "5362a1b7a88b6fd03c603330832ac50492e331e3f770699edaa2e8ced5e64a2c",
+	"lossy_alpha.webp":    "173d8c9b8076fe50041eba2e36300f4ae2e948fb07b3a46b973308fb3e46441f",
+	"palette.webp":        "ae49b084f3fd869ec39dfe10500d9bbd66ba44285e5489a57488c161ae5e8763",
+	"simple-gray.webp":    "cb35ab5de1ba9a40cbef0baa1f07c292bf4d6b7a15c9692a95a04cf1c7b294c4",
+	"simple-rgb.webp":     "ff12073d52e134d4e4b53299eeb1dcf2553c4fb3354b99af39449f567b7b0eb5",
+	"simple.webp":         "510803cfb923adb2cc326c9883470749ef0814c9ded9933b40bf59436d26cd61",
+	"simple_xmp.webp":     "510803cfb923adb2cc326c9883470749ef0814c9ded9933b40bf59436d26cd61",
+	"test.webp":           "a4069fd66062a6545429ebf7875c37e13ff556e6d72801646fb2693437200df9",
+}
 
 func readFile(t *testing.T, name string) []byte {
 	t.Helper()
@@ -600,6 +622,178 @@ func TestMalformedFiles(t *testing.T) {
 					t.Errorf("%s bit %d of byte %d flipped: %s", name, bit, off, msg)
 				}
 			}
+		}
+	}
+}
+
+func hashImage(h io.Writer, img image.Image) {
+	fmt.Fprintf(h, "%T %v ", img, img.Bounds())
+
+	switch p := img.(type) {
+	case *image.NRGBA:
+		fmt.Fprintf(h, "%d ", p.Stride)
+		h.Write(p.Pix)
+	case *image.RGBA:
+		fmt.Fprintf(h, "%d ", p.Stride)
+		h.Write(p.Pix)
+	case *image.Gray:
+		fmt.Fprintf(h, "%d ", p.Stride)
+		h.Write(p.Pix)
+	case *image.YCbCr:
+		fmt.Fprintf(h, "%d %d %d ", p.YStride, p.CStride, p.SubsampleRatio)
+		h.Write(p.Y)
+		h.Write(p.Cb)
+		h.Write(p.Cr)
+	case *image.NYCbCrA:
+		fmt.Fprintf(h, "%d %d %d %d ", p.YStride, p.CStride, p.SubsampleRatio, p.AStride)
+		h.Write(p.Y)
+		h.Write(p.Cb)
+		h.Write(p.Cr)
+		h.Write(p.A)
+	default:
+		fmt.Fprintf(h, "unhandled")
+	}
+}
+
+func goldenHash(data []byte) string {
+	h := sha256.New()
+
+	for _, o := range []Options{{}, {ToRGBA: true}, {ToYCbCr: true}} {
+		img, err := Decode(bytes.NewReader(data), o)
+		if err != nil {
+			fmt.Fprintf(h, "decode %v ", err)
+
+			continue
+		}
+
+		hashImage(h, img)
+	}
+
+	all, err := DecodeAll(bytes.NewReader(data))
+	if err != nil {
+		fmt.Fprintf(h, "all %v ", err)
+
+		return hex.EncodeToString(h.Sum(nil))
+	}
+
+	fmt.Fprintf(h, "%d %d ", len(all.Image), all.LoopCount)
+
+	for i, img := range all.Image {
+		if i < len(all.Delay) {
+			fmt.Fprintf(h, "%d ", all.Delay[i])
+		}
+
+		hashImage(h, img)
+	}
+
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// TestGoldenDecode pins the decoded output of every bundled file so the noasm
+// and kernel builds are provably identical, not merely both right against
+// libwebp. Run it under -tags noasm as well.
+func TestGoldenDecode(t *testing.T) {
+	files, err := filepath.Glob(filepath.Join("testdata", "*.webp"))
+	if err != nil || len(files) == 0 {
+		t.Fatalf("no testdata: %v", err)
+	}
+
+	seen := make(map[string]bool, len(files))
+
+	for _, path := range files {
+		name := filepath.Base(path)
+		seen[name] = true
+
+		got := goldenHash(readFile(t, name))
+
+		want, ok := goldenDecode[name]
+		if !ok {
+			t.Errorf("%s: no golden, computed %q", name, got)
+
+			continue
+		}
+
+		if got != want {
+			t.Errorf("%s: %s, want %s", name, got, want)
+		}
+	}
+
+	for name := range goldenDecode {
+		if !seen[name] {
+			t.Errorf("%s: golden for a file that is gone", name)
+		}
+	}
+}
+
+// TestGoldenCorpus does the same over the external corpus, against a listing
+// written beside it on first run. Run once per build to compare them.
+func TestGoldenCorpus(t *testing.T) {
+	dir := os.Getenv("CONFORMANCE_DIR")
+	if dir == "" {
+		t.Skip("set CONFORMANCE_DIR")
+	}
+
+	var files []string
+
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err == nil && !d.IsDir() && strings.EqualFold(filepath.Ext(path), ".webp") {
+			files = append(files, path)
+		}
+
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sort.Strings(files)
+
+	var b strings.Builder
+
+	for _, path := range files {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		rel, _ := filepath.Rel(dir, path)
+		fmt.Fprintf(&b, "%s %s\n", goldenHash(data), filepath.ToSlash(rel))
+	}
+
+	golden := filepath.Join(dir, "golden.txt")
+
+	want, err := os.ReadFile(golden)
+	if os.IsNotExist(err) {
+		if err := os.WriteFile(golden, []byte(b.String()), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		t.Logf("wrote %s for %d files; rerun under the other build to compare", golden, len(files))
+
+		return
+	}
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if string(want) == b.String() {
+		t.Logf("%d corpus files match %s", len(files), golden)
+
+		return
+	}
+
+	wantLines := strings.Split(strings.TrimRight(string(want), "\n"), "\n")
+	gotLines := strings.Split(strings.TrimRight(b.String(), "\n"), "\n")
+
+	if len(wantLines) != len(gotLines) {
+		t.Fatalf("%s has %d entries, corpus has %d; delete it to regenerate",
+			golden, len(wantLines), len(gotLines))
+	}
+
+	for i := range gotLines {
+		if gotLines[i] != wantLines[i] {
+			t.Errorf("golden mismatch:\n got %s\nwant %s", gotLines[i], wantLines[i])
 		}
 	}
 }
