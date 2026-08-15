@@ -45,7 +45,9 @@ func (d *boolDec) readSmallMV(p *[mvProbCount]uint8) int {
 	i := 0
 
 	for {
-		i = int(smallMVTree[i+d.getBit(p[mvShort+(i>>1)])])
+		d.fill()
+
+		i = int(smallMVTree[i+d.getBitFast(uint32(p[mvShort+(i>>1)]))])
 		if i <= 0 {
 			return -i
 		}
@@ -57,11 +59,15 @@ func (d *boolDec) readMVComponent(p *[mvProbCount]uint8) int {
 
 	if d.getBit(p[mvIsShort]) != 0 {
 		for i := range 3 {
-			x += d.getBit(p[mvBits+i]) << i
+			d.fill()
+
+			x += d.getBitFast(uint32(p[mvBits+i])) << i
 		}
 
 		for i := mvLongWidth - 1; i > 3; i-- {
-			x += d.getBit(p[mvBits+i]) << i
+			d.fill()
+
+			x += d.getBitFast(uint32(p[mvBits+i])) << i
 		}
 
 		if x&0xfff0 == 0 || d.getBit(p[mvBits+3]) != 0 {

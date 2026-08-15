@@ -12,31 +12,54 @@ var zigzag = [16]uint8{0, 1, 4, 8, 5, 2, 3, 6, 9, 12, 13, 10, 7, 11, 14, 15}
 type bandProbs = [numCtx][numProbas]uint8
 
 func (d *boolDec) largeValue(p *[numProbas]uint8) int32 {
-	if d.getBit(p[3]) == 0 {
-		if d.getBit(p[4]) == 0 {
+	d.fill()
+
+	if d.getBitFast(uint32(p[3])) == 0 {
+		d.fill()
+
+		if d.getBitFast(uint32(p[4])) == 0 {
 			return 2
 		}
 
-		return 3 + int32(d.getBit(p[5]))
+		d.fill()
+
+		return 3 + int32(d.getBitFast(uint32(p[5])))
 	}
 
-	if d.getBit(p[6]) == 0 {
-		if d.getBit(p[7]) == 0 {
-			return 5 + int32(d.getBit(159))
+	d.fill()
+
+	if d.getBitFast(uint32(p[6])) == 0 {
+		d.fill()
+
+		if d.getBitFast(uint32(p[7])) == 0 {
+			d.fill()
+
+			return 5 + int32(d.getBitFast(159))
 		}
 
-		v := 7 + 2*int32(d.getBit(165))
+		d.fill()
 
-		return v + int32(d.getBit(145))
+		v := 7 + 2*int32(d.getBitFast(165))
+
+		d.fill()
+
+		return v + int32(d.getBitFast(145))
 	}
 
-	bit1 := d.getBit(p[8])
-	cat := 2*bit1 + d.getBit(p[9+bit1])
+	d.fill()
+
+	bit1 := d.getBitFast(uint32(p[8]))
+
+	d.fill()
+
+	cat := 2*bit1 + d.getBitFast(uint32(p[9+bit1]))
 
 	var v int32
 
 	for _, prob := range catProbs[cat] {
-		v += v + int32(d.getBit(prob))
+		d.fill()
+
+		v += v + int32(d.getBitFast(uint32(prob)))
 	}
 
 	return v + 3 + 8<<cat
@@ -46,24 +69,32 @@ func getCoeffs(d *boolDec, bands *[17]*bandProbs, ctx int, dq *[2]uint16, n int,
 	p := &bands[n][ctx]
 
 	for ; n < 16; n++ {
-		if d.getBit(p[0]) == 0 {
+		d.fill()
+
+		if d.getBitFast(uint32(p[0])) == 0 {
 			return n
 		}
 
-		for d.getBit(p[1]) == 0 {
+		d.fill()
+
+		for d.getBitFast(uint32(p[1])) == 0 {
 			n++
 			if n == 16 {
 				return 16
 			}
 
 			p = &bands[n][0]
+
+			d.fill()
 		}
 
 		next := bands[n+1]
 
 		var v int32
 
-		if d.getBit(p[2]) == 0 {
+		d.fill()
+
+		if d.getBitFast(uint32(p[2])) == 0 {
 			v = 1
 			p = &next[1]
 		} else {
@@ -76,7 +107,9 @@ func getCoeffs(d *boolDec, bands *[17]*bandProbs, ctx int, dq *[2]uint16, n int,
 			q = int32(dq[0])
 		}
 
-		out[zigzag[n]] = int16(d.getSigned(v) * q)
+		d.fill()
+
+		out[zigzag[n]] = int16(d.getSignedFast(v) * q)
 	}
 
 	return 16

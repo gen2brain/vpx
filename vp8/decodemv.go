@@ -20,7 +20,9 @@ func (d *boolDec) readTree(tree []int8, p []uint8) int {
 	i := 0
 
 	for {
-		i = int(tree[i+d.getBit(p[i>>1])])
+		d.fill()
+
+		i = int(tree[i+d.getBitFast(uint32(p[i>>1]))])
 		if i <= 0 {
 			return -i
 		}

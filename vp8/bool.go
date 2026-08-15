@@ -2,8 +2,26 @@ package vp8
 
 import (
 	"encoding/binary"
-	"math/bits"
 )
+
+var normShift = [256]uint8{
+	8, 7, 6, 6, 5, 5, 5, 5, 4, 4, 4, 4, 4, 4, 4, 4,
+	3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
+	2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
+	2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
+	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+}
 
 const boolBits = 56
 
@@ -61,15 +79,17 @@ func (d *boolDec) loadFinal() {
 	}
 }
 
-func (d *boolDec) getBit(prob uint8) int {
-	r := d.rng
-
+func (d *boolDec) fill() {
 	if d.bits < 0 {
 		d.load()
 	}
+}
 
-	pos := uint(d.bits)
-	split := r * uint32(prob) >> 8
+func (d *boolDec) getBitFast(prob uint32) int {
+	r := d.rng
+
+	pos := uint(d.bits) & 63
+	split := r * prob >> 8
 
 	bit := 0
 
@@ -81,12 +101,17 @@ func (d *boolDec) getBit(prob uint8) int {
 		r = split + 1
 	}
 
-	shift := 8 - bits.Len32(r)
-	r <<= uint(shift)
-	d.bits -= shift
-	d.rng = r - 1
+	shift := uint(normShift[r])
+	d.bits -= int(shift)
+	d.rng = r<<shift - 1
 
 	return bit
+}
+
+func (d *boolDec) getBit(prob uint8) int {
+	d.fill()
+
+	return d.getBitFast(uint32(prob))
 }
 
 func (d *boolDec) getFlag() bool {
@@ -115,11 +140,13 @@ func (d *boolDec) getSignedBits(n int) int {
 }
 
 func (d *boolDec) getSigned(v int32) int32 {
-	if d.bits < 0 {
-		d.load()
-	}
+	d.fill()
 
-	pos := uint(d.bits)
+	return d.getSignedFast(v)
+}
+
+func (d *boolDec) getSignedFast(v int32) int32 {
+	pos := uint(d.bits) & 63
 	split := d.rng >> 1
 	mask := int32(split-uint32(d.value>>pos)) >> 31
 
