@@ -86,6 +86,10 @@ func (d *boolDec) fill() {
 }
 
 func (d *boolDec) getBitFast(prob uint32) int {
+	if boolDebug && d.bits < 0 {
+		panic("vp8: fast boolean read without fill")
+	}
+
 	r := d.rng
 
 	pos := uint(d.bits) & 63
@@ -146,6 +150,10 @@ func (d *boolDec) getSigned(v int32) int32 {
 }
 
 func (d *boolDec) getSignedFast(v int32) int32 {
+	if boolDebug && d.bits < 0 {
+		panic("vp8: fast boolean read without fill")
+	}
+
 	pos := uint(d.bits) & 63
 	split := d.rng >> 1
 	mask := int32(split-uint32(d.value>>pos)) >> 31
