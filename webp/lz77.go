@@ -44,6 +44,14 @@ func pixPairHash(a, b uint32, shift uint) uint32 {
 	return (b*hashMulHi + a*hashMulLo) >> shift
 }
 
+func matchLengthLong(a, b []uint32, limit int) int {
+	if matchLengthAsm != nil && limit > 0 && len(a) >= limit && len(b) >= limit {
+		return matchLengthAsm(a, b, limit)
+	}
+
+	return matchLength(a, b, limit)
+}
+
 func matchLength(a, b []uint32, limit int) int {
 	a, b = a[:limit], b[:limit:limit]
 
@@ -302,11 +310,11 @@ func backwardRefsRle(argb []uint32, xsize int, refs []ref) []ref {
 
 	for i := 1; i < len(argb); {
 		maxLen := copyLimit(len(argb) - i)
-		rle := matchLength(argb[i:], argb[i-1:], maxLen)
+		rle := matchLengthLong(argb[i:], argb[i-1:], maxLen)
 
 		prevRow := 0
 		if i >= xsize {
-			prevRow = matchLength(argb[i:], argb[i-xsize:], maxLen)
+			prevRow = matchLengthLong(argb[i:], argb[i-xsize:], maxLen)
 		}
 
 		switch {
