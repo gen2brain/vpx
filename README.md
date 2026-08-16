@@ -59,8 +59,9 @@ Threading worth 1.41x on a 1080p still and 1.55x on a lossy encode, and every en
 
 ### License
 
-The decoder and encoder are a port of libwebp, with parts taken from
-[webpkit](https://github.com/P4suta/webpkit). Both notices are in [COPYING](COPYING).
+The decoder and encoder are a port of libwebp, BSD-3-Clause, in [COPYING](COPYING), with parts
+taken from [webpkit](https://github.com/P4suta/webpkit), whose notice is in
+[COPYING.webpkit](COPYING.webpkit).
 
 This project is an implementation of a codec. It gives you no special rights on the VP8
 patents. Please read the [WebM patent grant](PATENTS) that applies to the VP8 specification
