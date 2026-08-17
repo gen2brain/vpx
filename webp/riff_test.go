@@ -582,6 +582,44 @@ func fileSurvives(b []byte) (msg string) {
 	return ""
 }
 
+func TestNotShownFrame(t *testing.T) {
+	for _, name := range []string{"test.webp", "anim.webp"} {
+		t.Run(name, func(t *testing.T) {
+			data := readFile(t, name)
+
+			c, err := parse(memSource(data))
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			img := c.image
+			if len(c.frames) > 0 {
+				img = c.frames[0].image
+			}
+
+			if !img.id.is(fccVP8) {
+				t.Fatalf("%s is not lossy", name)
+			}
+
+			bad := make([]byte, len(data))
+			copy(bad, data)
+			bad[img.off] &^= 1 << 4
+
+			if msg := fileSurvives(bad); msg != "" {
+				t.Error(msg)
+			}
+
+			if _, err := Decode(bytes.NewReader(bad)); err == nil {
+				t.Error("Decode accepted a frame the stream does not show")
+			}
+
+			if _, err := DecodeAll(bytes.NewReader(bad)); err == nil {
+				t.Error("DecodeAll accepted a frame the stream does not show")
+			}
+		})
+	}
+}
+
 func TestMalformedFiles(t *testing.T) {
 	names, err := filepath.Glob(filepath.Join("testdata", "*.webp"))
 	if err != nil || len(names) == 0 {
@@ -609,7 +647,7 @@ func TestMalformedFiles(t *testing.T) {
 				continue
 			}
 
-			for _, bit := range []uint{0, 3, 7} {
+			for bit := range uint(8) {
 				bad := make([]byte, len(data))
 				copy(bad, data)
 				bad[off] ^= 1 << bit

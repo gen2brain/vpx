@@ -134,6 +134,10 @@ func decodeLossy(data, alpha []byte, o Options) (image.Image, error) {
 		return nil, err
 	}
 
+	if pic == nil {
+		return nil, ErrInvalid
+	}
+
 	if o.output() == outRGBA {
 		img := image.NewRGBA(image.Rect(0, 0, pic.Width, pic.Height))
 

@@ -147,7 +147,7 @@ func (c *container) decodeFrameRGBA(f frame, o Options, a *animScratch) ([]byte,
 			return nil, err
 		}
 
-		if pic.Width != f.w || pic.Height != f.h {
+		if pic == nil || pic.Width != f.w || pic.Height != f.h {
 			return nil, ErrInvalid
 		}
 

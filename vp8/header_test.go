@@ -216,7 +216,7 @@ func TestMalformedFrames(t *testing.T) {
 				continue
 			}
 
-			for _, bit := range []uint{0, 3, 7} {
+			for bit := range uint(8) {
 				bad := make([]byte, len(data))
 				copy(bad, data)
 				bad[off] ^= 1 << bit
