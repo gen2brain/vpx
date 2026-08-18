@@ -24,8 +24,8 @@ file touches 46 bytes of it, and [Decode] never reads metadata it does not need.
 
 # Options
 
-[Options] are passed to any of the decode and encode functions and default to
-zero:
+[Options] are passed to [Decode] and [DecodeAll] and default to zero;
+[EncodeOptions] are passed to [Encode] and [EncodeAll]:
 
 	img, err := webp.Decode(r, webp.Options{
 		ToRGBA:     true, // premultiplied RGBA instead of the native planes
@@ -49,21 +49,23 @@ position. [Options.AutoRotate] applies the orientation to the decoded image.
 
 # Encoding
 
-	err := webp.Encode(w, img, webp.Options{Quality: 90})
+	err := webp.Encode(w, img, webp.EncodeOptions{Quality: 90})
 
 [Encode] writes a lossy image by default and a lossless one with
-[Options.Lossless], which is exact. [EncodeAll] writes an animation from a
+[EncodeOptions.Lossless], which is exact. [EncodeAll] writes an animation from a
 [WEBP]. Alpha is carried in both modes, losslessly in both.
 
-[Options.Method] trades speed for size in the range [0,6]. On the lossy side
+[EncodeOptions.Method] trades speed for size in the range [0,6]. On the lossy side
 subblock intra prediction comes in at 3, and rate-distortion refinement of the
 whole-macroblock modes, the chroma mode and trellis quantization at 5. On the
 lossless side 0 is a single fast pass and the cross-colour transform comes in
-at 6. [Options.Exact] preserves the RGB of fully transparent pixels, which an
+at 6. [EncodeOptions.Exact] preserves the RGB of fully transparent pixels, which an
 encoder is otherwise free to rewrite.
 
-[Options.Quality] and Method map onto different quantizers in every encoder, so
-comparing file sizes at a matched setting compares different operating points.
+[EncodeOptions.Quality] and Method map onto different quantizers in every encoder, so
+comparing file sizes at a matched setting compares different operating points. A zero Method
+is the fastest one, not [DefaultMethod]: only an omitted [EncodeOptions], or a negative
+Method, selects the default.
 */
 package webp
 
@@ -102,17 +104,9 @@ type WEBP struct {
 
 // Options are the decoding and encoding parameters. The zero value is the
 // default for both; a field a call does not apply to is ignored.
+// Options controls decoding.
 type Options struct {
-	// Quality in the range [0,100]. Default is 75.
-	Quality int
-	// Lossless enables lossless compression. Lossless ignores quality.
-	Lossless bool
-	// Method is the quality/speed trade-off in the range [0,6]. Default is 4.
-	Method int
-	// Exact preserves the RGB of fully transparent pixels, which an encoder
-	// is otherwise free to rewrite.
-	Exact bool
-	// AutoRotate applies the EXIF orientation to the decoded image (Decode/DecodeAll only).
+	// AutoRotate applies the EXIF orientation to the decoded image.
 	AutoRotate bool
 	// AlphaDither smooths an alpha plane the encoder reduced the level count
 	// of, in the range [0,100]. Default is 0, which is off.
@@ -124,7 +118,7 @@ type Options struct {
 	// converting a lossless one to YUV 4:2:0. That conversion is lossy, and is
 	// what libwebp's MODE_YUVA does.
 	ToYCbCr bool
-	// Threads bounds the goroutines a lossy frame is coded over. Zero means
+	// Threads bounds the goroutines a lossy frame is decoded over. Zero means
 	// GOMAXPROCS, one runs serially. Output is identical either way. A
 	// lossless image is one bitstream and ignores it.
 	Threads int
@@ -132,8 +126,26 @@ type Options struct {
 	// hostile header cannot ask for an unbounded allocation. Zero means
 	// [DefaultFrameSizeLimit], and a quarter of it for an animation, which
 	// composites several canvases at once; a negative value removes the limit.
-	// Decoding only.
 	FrameSizeLimit int
+}
+
+// EncodeOptions are the encoding parameters.
+type EncodeOptions struct {
+	// Quality in the range [0,100]. Zero selects DefaultQuality.
+	Quality int
+	// Lossless enables lossless compression. Lossless ignores Quality.
+	Lossless bool
+	// Method is the quality/speed trade-off in the range [0,6]. Zero is the
+	// fastest method, not the default; a negative value selects DefaultMethod,
+	// which is also what an omitted EncodeOptions uses.
+	Method int
+	// Exact preserves the RGB of fully transparent pixels, which an encoder
+	// is otherwise free to rewrite.
+	Exact bool
+	// Threads bounds the goroutines a lossy frame is coded over. Zero means
+	// GOMAXPROCS, one runs serially. Output is identical either way. A
+	// lossless image is one bitstream and ignores it.
+	Threads int
 }
 
 type features struct {
@@ -241,12 +253,12 @@ func DecodeAll(r io.Reader, opts ...Options) (*WEBP, error) {
 }
 
 // Encode writes the image m to w with the given options.
-func Encode(w io.Writer, m image.Image, o ...Options) error {
-	return encode(w, m, options(o))
+func Encode(w io.Writer, m image.Image, opts ...EncodeOptions) error {
+	return encode(w, m, encodeOptions(opts))
 }
 
 // EncodeAll writes the animation anim to w; all frames must share the same bounds.
-func EncodeAll(w io.Writer, anim *WEBP, o ...Options) error {
+func EncodeAll(w io.Writer, anim *WEBP, opts ...EncodeOptions) error {
 	if anim == nil || len(anim.Image) == 0 {
 		return ErrEncode
 	}
@@ -258,11 +270,19 @@ func EncodeAll(w io.Writer, anim *WEBP, o ...Options) error {
 		}
 	}
 
-	return encodeAll(w, anim, options(o))
+	return encodeAll(w, anim, encodeOptions(opts))
 }
 
 func options(opts []Options) Options {
-	o := Options{Quality: DefaultQuality, Method: DefaultMethod}
+	if len(opts) > 0 {
+		return opts[0]
+	}
+
+	return Options{}
+}
+
+func encodeOptions(opts []EncodeOptions) EncodeOptions {
+	o := EncodeOptions{Quality: DefaultQuality, Method: DefaultMethod}
 
 	if len(opts) == 0 {
 		return o

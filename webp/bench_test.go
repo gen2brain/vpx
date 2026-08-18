@@ -37,7 +37,7 @@ func BenchmarkDecode(b *testing.B) {
 	}
 }
 
-func benchLarge(b *testing.B, opts Options) []byte {
+func benchLarge(b *testing.B, opts EncodeOptions) []byte {
 	b.Helper()
 
 	src, err := Decode(bytes.NewReader(benchFile(b, "test.webp")))
@@ -63,7 +63,7 @@ func benchLarge(b *testing.B, opts Options) []byte {
 }
 
 func BenchmarkDecodeLarge(b *testing.B) {
-	data := benchLarge(b, Options{Quality: 75})
+	data := benchLarge(b, EncodeOptions{Quality: 75})
 
 	for _, n := range []int{1, 0} {
 		name := "threaded"
@@ -115,7 +115,7 @@ func BenchmarkEncodeLossless(b *testing.B) {
 			b.ReportAllocs()
 
 			for b.Loop() {
-				if err := Encode(io.Discard, img, Options{Lossless: true}); err != nil {
+				if err := Encode(io.Discard, img, EncodeOptions{Lossless: true}); err != nil {
 					b.Fatal(err)
 				}
 			}
@@ -143,7 +143,7 @@ func BenchmarkEncodeLossy(b *testing.B) {
 				b.ReportAllocs()
 
 				for b.Loop() {
-					if err := Encode(io.Discard, img, Options{Quality: 75, Threads: n}); err != nil {
+					if err := Encode(io.Discard, img, EncodeOptions{Quality: 75, Threads: n}); err != nil {
 						b.Fatal(err)
 					}
 				}
@@ -157,7 +157,7 @@ func BenchmarkEncodeLossy(b *testing.B) {
 				b.SetBytes(int64(4 * r.Dx() * r.Dy()))
 
 				for b.Loop() {
-					if err := Encode(io.Discard, img, Options{Quality: 75, Method: m}); err != nil {
+					if err := Encode(io.Discard, img, EncodeOptions{Quality: 75, Method: m}); err != nil {
 						b.Fatal(err)
 					}
 				}

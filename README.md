@@ -31,11 +31,11 @@ pic, err := d.DecodeFrame(data)
 ### Encoding
 
 ```go
-err := webp.Encode(w, img, webp.Options{Quality: 90})
+err := webp.Encode(w, img, webp.EncodeOptions{Quality: 90})
 ```
 
-`Options.Lossless` writes VP8L, which is exact. `webp.EncodeAll` writes an animation. The `vp8`
-package encodes video, a key frame and then frames predicted from it:
+`EncodeOptions.Lossless` writes VP8L, which is exact. `webp.EncodeAll` writes an animation.
+The `vp8` package encodes video, a key frame and then frames predicted from it:
 
 ```go
 e := vp8.Encoder{}

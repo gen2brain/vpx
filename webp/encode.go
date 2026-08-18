@@ -241,7 +241,7 @@ func (e *encoder) alphaFromPlane(a []byte, stride, width, height int) bool {
 	return !opaque
 }
 
-func (e *encoder) frameChunks(m image.Image, o Options) ([]chunkOut, error) {
+func (e *encoder) frameChunks(m image.Image, o EncodeOptions) ([]chunkOut, error) {
 	b := m.Bounds()
 	width, height := b.Dx(), b.Dy()
 
@@ -294,7 +294,7 @@ func (e *encoder) frameChunks(m image.Image, o Options) ([]chunkOut, error) {
 	return e.chunks[:2], nil
 }
 
-func encode(w io.Writer, m image.Image, o Options) error {
+func encode(w io.Writer, m image.Image, o EncodeOptions) error {
 	b := m.Bounds()
 	if b.Dx() <= 0 || b.Dy() <= 0 {
 		return ErrEncode
@@ -321,7 +321,7 @@ func encode(w io.Writer, m image.Image, o Options) error {
 	return writeFile(w, e.hdr[:], list)
 }
 
-func encodeAll(w io.Writer, anim *WEBP, o Options) error {
+func encodeAll(w io.Writer, anim *WEBP, o EncodeOptions) error {
 	b := anim.Image[0].Bounds()
 	width, height := b.Dx(), b.Dy()
 

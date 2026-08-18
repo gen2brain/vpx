@@ -439,7 +439,7 @@ func transformBits(method int) int {
 	return 5
 }
 
-func (e *losslessEncoder) encode(argb []uint32, width, height int, o Options) []byte {
+func (e *losslessEncoder) encode(argb []uint32, width, height int, o EncodeOptions) []byte {
 	var w lbitWriter
 
 	w.init(e.out)
@@ -457,7 +457,7 @@ func (e *losslessEncoder) encode(argb []uint32, width, height int, o Options) []
 	return e.out
 }
 
-func (e *losslessEncoder) encodeAlpha(argb []uint32, width, height int, o Options) []byte {
+func (e *losslessEncoder) encodeAlpha(argb []uint32, width, height int, o EncodeOptions) []byte {
 	var w lbitWriter
 
 	w.init(e.out)
@@ -471,7 +471,7 @@ func (e *losslessEncoder) encodeAlpha(argb []uint32, width, height int, o Option
 	return e.out
 }
 
-func (e *losslessEncoder) encodeStream(w *lbitWriter, argb []uint32, width, height int, o Options) {
+func (e *losslessEncoder) encodeStream(w *lbitWriter, argb []uint32, width, height int, o EncodeOptions) {
 	lowEffort := o.Method == 0
 	xsize := width
 
@@ -528,7 +528,7 @@ func (e *losslessEncoder) encodeStream(w *lbitWriter, argb []uint32, width, heig
 	e.encodeImage(w, argb, xsize, o.Quality, lowEffort, true)
 }
 
-func (e *losslessEncoder) crossColorPass(w *lbitWriter, argb []uint32, width, height, bits, tw, th, xsize int, o Options) {
+func (e *losslessEncoder) crossColorPass(w *lbitWriter, argb []uint32, width, height, bits, tw, th, xsize int, o EncodeOptions) {
 	mark := w.mark()
 
 	w.write(0, 1)

@@ -83,7 +83,7 @@ func TestEncodeLosslessRoundTrip(t *testing.T) {
 			t.Run(fmt.Sprintf("%s/m%d", name, method), func(t *testing.T) {
 				var buf bytes.Buffer
 
-				if err := Encode(&buf, img, Options{Lossless: true, Method: method}); err != nil {
+				if err := Encode(&buf, img, EncodeOptions{Lossless: true, Method: method}); err != nil {
 					t.Fatalf("encode: %v", err)
 				}
 
@@ -144,7 +144,7 @@ func TestEncodeLosslessAgainstDwebp(t *testing.T) {
 
 				var buf bytes.Buffer
 
-				if err := Encode(&buf, img, Options{Lossless: true, Exact: true, Method: method}); err != nil {
+				if err := Encode(&buf, img, EncodeOptions{Lossless: true, Exact: true, Method: method}); err != nil {
 					t.Fatalf("encode: %v", err)
 				}
 
@@ -590,7 +590,7 @@ func TestEncodeLossyRoundTrip(t *testing.T) {
 				for _, q := range []int{30, 75, 95} {
 					var buf bytes.Buffer
 
-					if err := Encode(&buf, img, Options{Quality: q, Method: method}); err != nil {
+					if err := Encode(&buf, img, EncodeOptions{Quality: q, Method: method}); err != nil {
 						t.Fatalf("q%d: encode: %v", q, err)
 					}
 
@@ -624,7 +624,7 @@ func TestEncodeLossyAgainstDwebp(t *testing.T) {
 			t.Run(fmt.Sprintf("%s/m%d", name, method), func(t *testing.T) {
 				var buf bytes.Buffer
 
-				if err := Encode(&buf, img, Options{Quality: 80, Method: method}); err != nil {
+				if err := Encode(&buf, img, EncodeOptions{Quality: 80, Method: method}); err != nil {
 					t.Fatalf("encode: %v", err)
 				}
 
@@ -670,7 +670,7 @@ func TestEncodeAnimation(t *testing.T) {
 	for _, lossless := range []bool{true, false} {
 		var buf bytes.Buffer
 
-		if err := EncodeAll(&buf, anim, Options{Lossless: lossless, Quality: 90}); err != nil {
+		if err := EncodeAll(&buf, anim, EncodeOptions{Lossless: lossless, Quality: 90}); err != nil {
 			t.Fatalf("lossless=%v: encode: %v", lossless, err)
 		}
 
@@ -735,7 +735,7 @@ func TestEncodeAnimationAgainstLibwebp(t *testing.T) {
 	for _, lossless := range []bool{true, false} {
 		var buf bytes.Buffer
 
-		if err := EncodeAll(&buf, anim, Options{Lossless: lossless, Quality: 90}); err != nil {
+		if err := EncodeAll(&buf, anim, EncodeOptions{Lossless: lossless, Quality: 90}); err != nil {
 			t.Fatalf("lossless=%v: encode: %v", lossless, err)
 		}
 
@@ -800,15 +800,15 @@ func TestEncodeAllocs(t *testing.T) {
 		max  float64
 		fn   func()
 	}{
-		{"lossless", 0, func() { Encode(io.Discard, imgs["gradient-64x48"], Options{Lossless: true}) }},
-		{"lossless alpha", 0, func() { Encode(io.Discard, imgs["palette-64x48"], Options{Lossless: true}) }},
-		{"lossy", 0, func() { Encode(io.Discard, imgs["gradient-64x48"], Options{Quality: 75}) }},
-		{"lossy alpha", 0, func() { Encode(io.Discard, imgs["palette-64x48"], Options{Quality: 75}) }},
-		{"lossy 4:2:0 in", 0, func() { Encode(io.Discard, lossy, Options{Quality: 75}) }},
-		{"animation", 0, func() { EncodeAll(io.Discard, anim, Options{Quality: 75}) }},
-		{"lossy threaded", 1, func() { Encode(io.Discard, lossy, Options{Quality: 75, Threads: 2}) }},
-		{"lossy i4x4", 0, func() { Encode(io.Discard, imgs["gradient-64x48"], Options{Quality: 75, Method: 4}) }},
-		{"lossy i4x4 512", 0, func() { Encode(io.Discard, lossy, Options{Quality: 75, Method: 4}) }},
+		{"lossless", 0, func() { Encode(io.Discard, imgs["gradient-64x48"], EncodeOptions{Lossless: true}) }},
+		{"lossless alpha", 0, func() { Encode(io.Discard, imgs["palette-64x48"], EncodeOptions{Lossless: true}) }},
+		{"lossy", 0, func() { Encode(io.Discard, imgs["gradient-64x48"], EncodeOptions{Quality: 75}) }},
+		{"lossy alpha", 0, func() { Encode(io.Discard, imgs["palette-64x48"], EncodeOptions{Quality: 75}) }},
+		{"lossy 4:2:0 in", 0, func() { Encode(io.Discard, lossy, EncodeOptions{Quality: 75}) }},
+		{"animation", 0, func() { EncodeAll(io.Discard, anim, EncodeOptions{Quality: 75}) }},
+		{"lossy threaded", 1, func() { Encode(io.Discard, lossy, EncodeOptions{Quality: 75, Threads: 2}) }},
+		{"lossy i4x4", 0, func() { Encode(io.Discard, imgs["gradient-64x48"], EncodeOptions{Quality: 75, Method: 4}) }},
+		{"lossy i4x4 512", 0, func() { Encode(io.Discard, lossy, EncodeOptions{Quality: 75, Method: 4}) }},
 	}
 
 	for _, tt := range tests {
@@ -847,7 +847,7 @@ func FuzzEncodeLossless(f *testing.F) {
 
 		var buf bytes.Buffer
 
-		if err := Encode(&buf, src, Options{Lossless: true, Exact: true}); err != nil {
+		if err := Encode(&buf, src, EncodeOptions{Lossless: true, Exact: true}); err != nil {
 			t.Fatalf("encode: %v", err)
 		}
 
@@ -885,7 +885,7 @@ func FuzzEncodeLossy(f *testing.F) {
 
 		var buf bytes.Buffer
 
-		if err := Encode(&buf, src, Options{Quality: int(quality) % 101}); err != nil {
+		if err := Encode(&buf, src, EncodeOptions{Quality: int(quality) % 101}); err != nil {
 			t.Fatalf("encode: %v", err)
 		}
 
@@ -912,7 +912,7 @@ func FuzzEncodeAll(f *testing.F) {
 
 		var buf bytes.Buffer
 
-		if err := EncodeAll(&buf, anim, Options{Lossless: lossless}); err != nil {
+		if err := EncodeAll(&buf, anim, EncodeOptions{Lossless: lossless}); err != nil {
 			t.Fatalf("encode: %v", err)
 		}
 
@@ -936,7 +936,7 @@ func TestEncodeThreadsMatchSerial(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		for _, o := range []Options{{Quality: 75}, {Quality: 40}, {Quality: 95, Method: 6}, {Lossless: true}} {
+		for _, o := range []EncodeOptions{{Quality: 75}, {Quality: 40}, {Quality: 95, Method: 6}, {Lossless: true}} {
 			o.Threads = 1
 
 			var want bytes.Buffer
