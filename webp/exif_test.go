@@ -42,6 +42,49 @@ func TestDecodeExifNone(t *testing.T) {
 	}
 }
 
+func TestRawExif(t *testing.T) {
+	b, err := RawExif(bytes.NewReader(readFile(t, "exif.webp")))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(b) < 8 {
+		t.Fatalf("payload is %d bytes", len(b))
+	}
+
+	if order := string(b[:2]); order != "II" && order != "MM" {
+		t.Errorf("payload starts with %q, want a TIFF byte order mark", order)
+	}
+
+	ex := &Exif{Orientation: 1}
+	if err := parseExifData(b, ex); err != nil {
+		t.Fatalf("the payload does not parse: %v", err)
+	}
+
+	if ex.Orientation != 6 {
+		t.Errorf("Orientation = %d, want 6", ex.Orientation)
+	}
+
+	if _, err := RawExif(bytes.NewReader(readFile(t, "test.webp"))); err != ErrNoExif {
+		t.Errorf("err = %v, want ErrNoExif", err)
+	}
+}
+
+func TestRawXMP(t *testing.T) {
+	b, err := RawXMP(bytes.NewReader(readFile(t, "simple_xmp.webp")))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !bytes.Contains(b, []byte("<x:xmpmeta")) {
+		t.Errorf("payload is not an XMP packet: %.64q", b)
+	}
+
+	if _, err := RawXMP(bytes.NewReader(readFile(t, "test.webp"))); err != ErrNoXMP {
+		t.Errorf("err = %v, want ErrNoXMP", err)
+	}
+}
+
 func TestDecodeAutoRotate(t *testing.T) {
 	data, err := os.ReadFile("testdata/exif.webp")
 	if err != nil {

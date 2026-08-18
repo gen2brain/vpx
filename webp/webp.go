@@ -46,6 +46,8 @@ that a hostile file cannot exhaust memory, and gives [ErrUnsupported] above it.
 [DecodeExif] reads the EXIF of a file without decoding its pixels and returns
 an [Exif] with the orientation, the camera and lens fields, and the GPS
 position. [Options.AutoRotate] applies the orientation to the decoded image.
+[RawExif] and [RawXMP] return the payloads themselves, for a caller with its own
+parser; [RawExif] starts at the TIFF header, past the prefix some writers add.
 
 # Encoding
 

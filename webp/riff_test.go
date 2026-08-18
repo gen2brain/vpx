@@ -385,6 +385,8 @@ func FuzzDecode(f *testing.F) {
 		DecodeConfig(bytes.NewReader(b))
 		Decode(bytes.NewReader(b), o)
 		DecodeAll(bytes.NewReader(b), o)
+		RawExif(bytes.NewReader(b))
+		RawXMP(bytes.NewReader(b))
 	})
 }
 
@@ -639,6 +641,8 @@ func fileSurvives(b []byte) (msg string) {
 	Decode(bytes.NewReader(b), Options{ToYCbCr: true, AlphaDither: 100})
 	DecodeAll(bytes.NewReader(b))
 	DecodeExif(bytes.NewReader(b))
+	RawExif(bytes.NewReader(b))
+	RawXMP(bytes.NewReader(b))
 
 	return ""
 }

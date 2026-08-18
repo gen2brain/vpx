@@ -7,8 +7,12 @@ import (
 	"io"
 )
 
-// ErrNoExif is returned by [DecodeExif] for a file that carries no EXIF chunk.
+// ErrNoExif is returned by [DecodeExif] and [RawExif] for a file that carries
+// no EXIF chunk.
 var ErrNoExif = errors.New("webp: no exif data")
+
+// ErrNoXMP is returned by [RawXMP] for a file that carries no XMP chunk.
+var ErrNoXMP = errors.New("webp: no xmp data")
 
 // Exif is the EXIF metadata of a file, as far as this package parses it.
 // A field the file does not carry is left at its zero value.
@@ -62,6 +66,45 @@ func DecodeExif(r io.Reader) (*Exif, error) {
 	}
 
 	return exif, nil
+}
+
+// RawExif returns the EXIF payload of a WebP without decoding its pixels,
+// starting at the TIFF header: the "Exif\x00\x00" some writers put in front of
+// it is removed. It returns [ErrNoExif] for a file that carries none. The
+// result may alias the reader's own bytes, so it must not be modified.
+func RawExif(r io.Reader) ([]byte, error) {
+	b, err := rawChunk(r, func(c *container) chunk { return c.exif }, ErrNoExif)
+	if err != nil {
+		return nil, err
+	}
+
+	return stripExifPrefix(b), nil
+}
+
+// RawXMP returns the XMP packet of a WebP without decoding its pixels. It
+// returns [ErrNoXMP] for a file that carries none. The result may alias the
+// reader's own bytes, so it must not be modified.
+func RawXMP(r io.Reader) ([]byte, error) {
+	return rawChunk(r, func(c *container) chunk { return c.xmp }, ErrNoXMP)
+}
+
+func rawChunk(r io.Reader, pick func(*container) chunk, absent error) ([]byte, error) {
+	s, err := srcFor(r)
+	if err != nil {
+		return nil, err
+	}
+
+	c, err := parse(s)
+	if err != nil {
+		return nil, absent
+	}
+
+	b, err := c.payload(pick(c))
+	if err != nil || b == nil {
+		return nil, absent
+	}
+
+	return b, nil
 }
 
 func stripExifPrefix(b []byte) []byte {
