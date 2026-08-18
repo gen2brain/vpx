@@ -123,6 +123,7 @@ type losslessDecoder struct {
 	tmp        []uint32
 	arena      huffArena
 	lenScratch []uint16
+	sizeLimit  int
 }
 
 func (d *losslessDecoder) reset() {
@@ -173,6 +174,15 @@ func decodeVP8LAlpha(d *losslessDecoder, data []byte, width, height int) ([]uint
 func (d *losslessDecoder) decode(width, height int) ([]uint32, error) {
 	if width <= 0 || height <= 0 || width > vp8lMaxDimension || height > vp8lMaxDimension {
 		return nil, ErrInvalid
+	}
+
+	limit := d.sizeLimit
+	if limit <= 0 {
+		limit = maxStillArea
+	}
+
+	if width*height > limit {
+		return nil, ErrUnsupported
 	}
 
 	d.reset()

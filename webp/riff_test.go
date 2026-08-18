@@ -217,6 +217,32 @@ func TestCanvasAreaLimit(t *testing.T) {
 	}
 }
 
+func TestLosslessAreaLimit(t *testing.T) {
+	data := append([]byte{vp8lSignature, 0xff, 0xff, 0xff, 0x0f}, bytes.Repeat([]byte{0}, 16)...)
+
+	d := losslessDecoder{sizeLimit: 1 << 20}
+
+	var before, after runtime.MemStats
+
+	runtime.ReadMemStats(&before)
+
+	_, w, h, err := decodeVP8L(&d, data)
+
+	runtime.ReadMemStats(&after)
+
+	if w != 0 || h != 0 {
+		t.Errorf("size = %dx%d, want 0x0", w, h)
+	}
+
+	if !errors.Is(err, ErrUnsupported) {
+		t.Errorf("err = %v, want %v", err, ErrUnsupported)
+	}
+
+	if n := after.TotalAlloc - before.TotalAlloc; n > 1<<20 {
+		t.Errorf("allocated %d bytes, want the image never to be reached", n)
+	}
+}
+
 func riffSize(b []byte, size uint32) []byte {
 	out := bytes.Clone(b)
 	binary.LittleEndian.PutUint32(out[4:8], size)
@@ -353,7 +379,7 @@ func FuzzDecodeVP8L(f *testing.F) {
 	}
 
 	f.Fuzz(func(t *testing.T, b []byte) {
-		var d losslessDecoder
+		d := losslessDecoder{sizeLimit: 1 << 20}
 
 		decodeVP8L(&d, b)
 	})
