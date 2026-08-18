@@ -243,6 +243,39 @@ func TestLosslessAreaLimit(t *testing.T) {
 	}
 }
 
+func TestFrameSizeLimitOption(t *testing.T) {
+	tests := []struct {
+		name  string
+		file  string
+		limit int
+		want  error
+	}{
+		{"lossy under", "test.webp", 1 << 20, nil},
+		{"lossy over", "test.webp", 1 << 10, ErrUnsupported},
+		{"lossless under", "simple.webp", 1 << 20, nil},
+		{"lossless over", "simple.webp", 1 << 10, ErrUnsupported},
+		{"animation under", "anim.webp", 1 << 20, nil},
+		{"animation over", "anim.webp", 1 << 10, ErrUnsupported},
+		{"negative removes the limit", "test.webp", -1, nil},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			o := Options{FrameSizeLimit: tt.limit}
+
+			_, err := Decode(bytes.NewReader(readFile(t, tt.file)), o)
+			if !errors.Is(err, tt.want) {
+				t.Errorf("Decode err = %v, want %v", err, tt.want)
+			}
+
+			_, err = DecodeAll(bytes.NewReader(readFile(t, tt.file)), o)
+			if !errors.Is(err, tt.want) {
+				t.Errorf("DecodeAll err = %v, want %v", err, tt.want)
+			}
+		})
+	}
+}
+
 func riffSize(b []byte, size uint32) []byte {
 	out := bytes.Clone(b)
 	binary.LittleEndian.PutUint32(out[4:8], size)
@@ -347,9 +380,11 @@ func FuzzDecode(f *testing.F) {
 	}
 
 	f.Fuzz(func(t *testing.T, b []byte) {
+		o := Options{FrameSizeLimit: 1 << 20}
+
 		DecodeConfig(bytes.NewReader(b))
-		Decode(bytes.NewReader(b))
-		DecodeAll(bytes.NewReader(b))
+		Decode(bytes.NewReader(b), o)
+		DecodeAll(bytes.NewReader(b), o)
 	})
 }
 

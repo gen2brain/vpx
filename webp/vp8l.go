@@ -126,6 +126,17 @@ type losslessDecoder struct {
 	sizeLimit  int
 }
 
+func (d *losslessDecoder) limit() int {
+	switch {
+	case d.sizeLimit < 0:
+		return 0
+	case d.sizeLimit == 0:
+		return maxStillArea
+	}
+
+	return d.sizeLimit
+}
+
 func (d *losslessDecoder) reset() {
 	d.transforms = [numTransforms]*transform{}
 	d.order = d.order[:0]
@@ -176,12 +187,7 @@ func (d *losslessDecoder) decode(width, height int) ([]uint32, error) {
 		return nil, ErrInvalid
 	}
 
-	limit := d.sizeLimit
-	if limit <= 0 {
-		limit = maxStillArea
-	}
-
-	if width*height > limit {
+	if limit := d.limit(); limit > 0 && width*height > limit {
 		return nil, ErrUnsupported
 	}
 

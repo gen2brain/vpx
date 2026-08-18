@@ -18,7 +18,7 @@ Conversion to RGB belongs to the caller; the webp package does it.
 
 A malformed frame gives [ErrInvalid] and a well formed one this package cannot
 decode gives [ErrUnsupported]. Nothing panics on untrusted input, and
-[Decoder.SizeLimit] bounds the pixel area a frame header may ask to allocate so
+[Decoder.FrameSizeLimit] bounds the pixel area a frame header may ask to allocate so
 that a hostile file cannot exhaust memory.
 
 # Encoding

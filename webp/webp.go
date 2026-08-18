@@ -15,8 +15,8 @@ from the package this replaces, which converts everything to *[image.NYCbCrA].
 That conversion loses data; [Options.ToYCbCr] asks for it when parity matters.
 
 A malformed file gives [ErrInvalid] and a well formed one this package cannot
-decode gives [ErrUnsupported]. A caller with another decoder to fall back on
-wants to tell those apart.
+decode gives [ErrUnsupported], including a bitstream error the vp8 package
+raised. A caller with another decoder to fall back on wants to tell those apart.
 
 A reader that is also an [io.ReaderAt] and an [io.Seeker], such as an *[os.File],
 is addressed by range rather than read into memory: [DecodeConfig] on a 47 KB
@@ -38,6 +38,8 @@ zero:
 reduced, which libwebp's decoder only does when asked, and so does this one.
 [Options.Threads] bounds the goroutines a lossy frame is coded over; the output
 is identical either way, and a lossless image is one bitstream and ignores it.
+[Options.FrameSizeLimit] bounds the pixel area a header may ask to allocate, so
+that a hostile file cannot exhaust memory, and gives [ErrUnsupported] above it.
 
 # Metadata
 
@@ -83,6 +85,11 @@ const DefaultQuality = 75
 // DefaultMethod is the default method encoding parameter.
 const DefaultMethod = 4
 
+// DefaultFrameSizeLimit is the image area, in pixels, accepted when
+// [Options.FrameSizeLimit] is zero. It is the largest picture VP8 and VP8L can
+// describe, so it refuses nothing a valid file asks for.
+const DefaultFrameSizeLimit = vp8.DefaultFrameSizeLimit
+
 // WEBP represents the possibly multiple images stored in a WebP file.
 type WEBP struct {
 	// Decoded images.
@@ -121,6 +128,12 @@ type Options struct {
 	// GOMAXPROCS, one runs serially. Output is identical either way. A
 	// lossless image is one bitstream and ignores it.
 	Threads int
+	// FrameSizeLimit bounds a frame's area in pixels, so that a corrupt or
+	// hostile header cannot ask for an unbounded allocation. Zero means
+	// [DefaultFrameSizeLimit], and a quarter of it for an animation, which
+	// composites several canvases at once; a negative value removes the limit.
+	// Decoding only.
+	FrameSizeLimit int
 }
 
 type features struct {
@@ -150,7 +163,7 @@ func (c *container) features() (features, error) {
 	case fccVP8:
 		h, err := vp8.ParseFrameHeader(b)
 		if err != nil {
-			return f, err
+			return f, fromVP8(err)
 		}
 
 		if !h.KeyFrame {

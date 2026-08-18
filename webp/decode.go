@@ -55,12 +55,16 @@ func decode(s *source, o Options, all bool) (*WEBP, error) {
 		return nil, err
 	}
 
-	limit := uint64(maxStillArea)
+	limit := maxStillArea
 	if c.animated() {
 		limit = maxCanvasArea
 	}
 
-	if uint64(c.width)*uint64(c.height) > limit {
+	if o.FrameSizeLimit != 0 {
+		limit = o.FrameSizeLimit
+	}
+
+	if limit > 0 && uint64(c.width)*uint64(c.height) > uint64(limit) {
 		return nil, ErrUnsupported
 	}
 
@@ -128,10 +132,12 @@ func decodeLossy(data, alpha []byte, o Options) (image.Image, error) {
 	defer putStill(s)
 
 	s.vp8.Threads = o.Threads
+	s.vp8.FrameSizeLimit = o.FrameSizeLimit
+	s.lossless.sizeLimit = o.FrameSizeLimit
 
 	pic, err := s.vp8.DecodeFrame(data)
 	if err != nil {
-		return nil, err
+		return nil, fromVP8(err)
 	}
 
 	if pic == nil {
@@ -190,6 +196,8 @@ func applyAlphaRGBA(ll *losslessDecoder, img *image.RGBA, alpha []byte, dither i
 func decodeLossless(data []byte, o Options) (image.Image, error) {
 	s := getStill()
 	defer putStill(s)
+
+	s.lossless.sizeLimit = o.FrameSizeLimit
 
 	px, w, h, err := decodeVP8L(&s.lossless, data)
 	if err != nil {

@@ -4,6 +4,8 @@ import (
 	"encoding/binary"
 	"errors"
 	"math"
+
+	"github.com/gen2brain/vpx/vp8"
 )
 
 // ErrInvalid is returned for a file that is not a well formed WebP.
@@ -13,6 +15,19 @@ var ErrInvalid = errors.New("webp: invalid file")
 // otherwise well formed. A caller with another decoder to fall back on should
 // test for this one rather than for [ErrInvalid].
 var ErrUnsupported = errors.New("webp: unsupported feature")
+
+// fromVP8 restates a bitstream error as this package's own, so that a caller
+// can match it without importing vp8.
+func fromVP8(err error) error {
+	switch {
+	case errors.Is(err, vp8.ErrUnsupported):
+		return ErrUnsupported
+	case errors.Is(err, vp8.ErrInvalid):
+		return ErrInvalid
+	}
+
+	return err
+}
 
 const (
 	fccRIFF = "RIFF"
@@ -45,7 +60,7 @@ const (
 	maxSourceSize   = min(maxChunkPayload, math.MaxInt)
 	maxCanvasSize   = 1 << 24
 	maxImageArea    = 1 << 32
-	maxStillArea    = min(1<<28, math.MaxInt>>6)
+	maxStillArea    = DefaultFrameSizeLimit
 	maxCanvasArea   = min(1<<26, math.MaxInt>>8)
 )
 

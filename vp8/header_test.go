@@ -153,7 +153,7 @@ func FuzzDecodeFrame(f *testing.F) {
 	f.Fuzz(func(t *testing.T, b []byte) {
 		ParseFrameHeader(b)
 
-		d := Decoder{SizeLimit: 1 << 20}
+		d := Decoder{FrameSizeLimit: 1 << 20}
 		d.DecodeFrame(b)
 	})
 }
@@ -183,7 +183,7 @@ func decodeSurvives(b []byte) (msg string) {
 
 	ParseFrameHeader(b)
 
-	d := Decoder{SizeLimit: 1 << 20}
+	d := Decoder{FrameSizeLimit: 1 << 20}
 	d.DecodeFrame(b)
 
 	return ""

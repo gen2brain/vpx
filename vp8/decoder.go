@@ -92,9 +92,10 @@ type Decoder struct {
 	fStrengths [numSegments][numRefFrames][4]fInfo
 	fInfoRow   []uint8
 
-	// SizeLimit bounds the pixel area a frame header may ask to allocate.
-	// Zero means [DefaultFrameSizeLimit].
-	SizeLimit int
+	// FrameSizeLimit bounds a frame's area in pixels, so that a corrupt or
+	// hostile header cannot ask for an unbounded allocation. Zero means
+	// [DefaultFrameSizeLimit]; a negative value removes the limit.
+	FrameSizeLimit int
 
 	// Threads is the number of goroutines to decode with. Zero means
 	// [runtime.GOMAXPROCS], one is serial.
@@ -146,6 +147,17 @@ func (d *Decoder) Release() {
 	clear(d.parts[:])
 }
 
+func (d *Decoder) limit() int {
+	switch {
+	case d.FrameSizeLimit < 0:
+		return 0
+	case d.FrameSizeLimit == 0:
+		return DefaultFrameSizeLimit
+	}
+
+	return d.FrameSizeLimit
+}
+
 func (d *Decoder) parseHeader(data []byte) error {
 	h, err := ParseFrameHeader(data)
 	if err != nil {
@@ -153,12 +165,7 @@ func (d *Decoder) parseHeader(data []byte) error {
 	}
 
 	if h.KeyFrame {
-		limit := d.SizeLimit
-		if limit <= 0 {
-			limit = DefaultFrameSizeLimit
-		}
-
-		if h.Width*h.Height > limit {
+		if limit := d.limit(); limit > 0 && h.Width*h.Height > limit {
 			return ErrUnsupported
 		}
 
