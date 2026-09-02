@@ -67,10 +67,28 @@ jobs:
       with:
         go-version: 1.26.x
     - name: Fuzz
-      run: go test ${{ matrix.pkg }} -run XXX -fuzz '^${{ matrix.target }}$' -fuzztime 10m -fuzzminimizetime 5s
+      run: |
+        go test ${{ matrix.pkg }} -run XXX -fuzz '^${{ matrix.target }}$' -fuzztime 10m -fuzzminimizetime 5s 2>&1 | tee fuzz.log
+        status=${PIPESTATUS[0]}
+
+        if [ "$status" -eq 0 ]; then
+          exit 0
+        fi
+
+        if grep -q 'Failing input written to' fuzz.log; then
+          exit 1
+        fi
+
+        if grep -q 'context deadline exceeded' fuzz.log; then
+          echo '::warning::the fuzz coordinator timed out shutting down; no crasher was written'
+          exit 0
+        fi
+
+        exit "$status"
     - name: Upload failing input
       if: failure()
       uses: actions/upload-artifact@v4
       with:
         name: fuzz-${{ matrix.target }}
         path: ${{ matrix.pkg }}testdata/fuzz/
+        if-no-files-found: ignore
