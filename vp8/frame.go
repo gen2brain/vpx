@@ -331,6 +331,8 @@ func (d *Decoder) DecodeFrame(data []byte) (*Picture, error) {
 
 	d.rotateBuffers()
 
+	d.ready = true
+
 	if !d.hdr.Show {
 		return nil, nil
 	}

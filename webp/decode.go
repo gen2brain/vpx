@@ -127,7 +127,24 @@ func copyPlane(dst []byte, dstStride int, src []byte, srcStride, w, h int) {
 	}
 }
 
+func keyFrame(data []byte) error {
+	h, err := vp8.ParseFrameHeader(data)
+	if err != nil {
+		return fromVP8(err)
+	}
+
+	if !h.KeyFrame {
+		return ErrUnsupported
+	}
+
+	return nil
+}
+
 func decodeLossy(data, alpha []byte, o Options) (image.Image, error) {
+	if err := keyFrame(data); err != nil {
+		return nil, err
+	}
+
 	s := getStill()
 	defer putStill(s)
 

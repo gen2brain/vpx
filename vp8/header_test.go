@@ -1,6 +1,7 @@
 package vp8
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -89,6 +90,83 @@ func TestParseFrameHeaderInter(t *testing.T) {
 	}
 }
 
+func TestInterFrameNeedsReference(t *testing.T) {
+	failing, err := os.ReadFile(filepath.Join("testdata", "simple-gray.vp8"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var e Encoder
+
+	o := EncodeOptions{Quality: 80}
+
+	key, err := e.Encode(movingPicture(64, 48, 0), o)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	key = bytes.Clone(key)
+
+	inter, err := e.EncodeInter(movingPicture(64, 48, 2), o)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var d Decoder
+
+	if _, err := d.DecodeFrame(key); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := d.DecodeFrame(inter); err != nil {
+		t.Fatalf("the inter frame does not decode after its key frame: %v", err)
+	}
+
+	fuzzed := []byte("1\x05\x0000000%000000000000000000000000000000000000000")
+
+	tests := []struct {
+		name   string
+		before [][]byte
+		inter  []byte
+	}{
+		{"failed key frame first", [][]byte{failing[:295]}, fuzzed},
+		{"failed key frame of another size", [][]byte{key, failing[:295]}, inter},
+		{"released decoder", [][]byte{key, nil}, inter},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var d Decoder
+
+			for _, f := range tt.before {
+				if f == nil {
+					d.Release()
+
+					continue
+				}
+
+				d.DecodeFrame(f)
+			}
+
+			var err error
+
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						t.Fatalf("panic: %v", r)
+					}
+				}()
+
+				_, err = d.DecodeFrame(tt.inter)
+			}()
+
+			if !errors.Is(err, ErrInvalid) {
+				t.Errorf("err = %v, want %v", err, ErrInvalid)
+			}
+		})
+	}
+}
+
 func TestParseFrameHeaderProfile(t *testing.T) {
 	for profile := range 4 {
 		h, err := ParseFrameHeader(keyFrame(profile, 1, 16, 16, 0, 0, true))
@@ -155,6 +233,29 @@ func FuzzDecodeFrame(f *testing.F) {
 
 		d := Decoder{FrameSizeLimit: 1 << 20}
 		d.DecodeFrame(b)
+	})
+}
+
+func FuzzDecodeSequence(f *testing.F) {
+	inter := []byte("1\x05\x0000000%000000000000000000000000000000000000000")
+
+	for _, name := range fuzzSeeds(f) {
+		b, err := os.ReadFile(name)
+		if err != nil {
+			f.Fatal(err)
+		}
+
+		f.Add(b, inter)
+		f.Add(b[:len(b)/7], inter)
+	}
+
+	f.Fuzz(func(t *testing.T, first, second []byte) {
+		d := Decoder{FrameSizeLimit: 1 << 20}
+
+		d.DecodeFrame(first)
+		d.DecodeFrame(second)
+		d.Release()
+		d.DecodeFrame(second)
 	})
 }
 

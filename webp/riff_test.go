@@ -647,6 +647,56 @@ func fileSurvives(b []byte) (msg string) {
 	return ""
 }
 
+func TestInterFrameInContainer(t *testing.T) {
+	tests := []struct {
+		file  string
+		frame int
+	}{
+		{"test.webp", -1},
+		{"anim.webp", 0},
+		{"anim.webp", 1},
+	}
+
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("%s/%d", tt.file, tt.frame), func(t *testing.T) {
+			data := readFile(t, tt.file)
+
+			c, err := parse(memSource(data))
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			img := c.image
+			if tt.frame >= 0 {
+				img = c.frames[tt.frame].image
+			}
+
+			bad := bytes.Clone(data)
+			bad[img.off] |= 1
+
+			if msg := fileSurvives(bad); msg != "" {
+				t.Fatal(msg)
+			}
+
+			if _, err := DecodeAll(bytes.NewReader(bad)); !errors.Is(err, ErrUnsupported) {
+				t.Errorf("DecodeAll err = %v, want %v", err, ErrUnsupported)
+			}
+
+			if tt.frame > 0 {
+				return
+			}
+
+			if _, err := Decode(bytes.NewReader(bad)); !errors.Is(err, ErrUnsupported) {
+				t.Errorf("Decode err = %v, want %v", err, ErrUnsupported)
+			}
+
+			if _, err := DecodeConfig(bytes.NewReader(bad)); tt.frame < 0 && !errors.Is(err, ErrUnsupported) {
+				t.Errorf("DecodeConfig err = %v, want %v", err, ErrUnsupported)
+			}
+		})
+	}
+}
+
 func TestNotShownFrame(t *testing.T) {
 	for _, name := range []string{"test.webp", "anim.webp"} {
 		t.Run(name, func(t *testing.T) {

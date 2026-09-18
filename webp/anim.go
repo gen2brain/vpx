@@ -142,6 +142,10 @@ func (c *container) decodeFrameRGBA(f frame, o Options, a *animScratch) ([]byte,
 
 	switch string(f.image.id[:]) {
 	case fccVP8:
+		if err := keyFrame(data); err != nil {
+			return nil, err
+		}
+
 		a.vp8.Threads = o.Threads
 		a.vp8.FrameSizeLimit = o.FrameSizeLimit
 

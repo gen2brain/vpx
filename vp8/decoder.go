@@ -87,6 +87,7 @@ type Decoder struct {
 	mbW, mbH       int
 	width, height  int
 	allocW, allocH int
+	ready          bool
 
 	filterType int
 	fStrengths [numSegments][numRefFrames][4]fInfo
@@ -143,6 +144,7 @@ type Decoder struct {
 // decode.
 func (d *Decoder) Release() {
 	d.br = boolDec{}
+	d.ready = false
 
 	clear(d.parts[:])
 }
@@ -168,12 +170,16 @@ func (d *Decoder) parseHeader(data []byte) error {
 		if limit := d.limit(); limit > 0 && h.Width*h.Height > limit {
 			return ErrUnsupported
 		}
+	} else if !d.ready {
+		return ErrInvalid
+	}
 
+	d.ready = false
+
+	if h.KeyFrame {
 		d.mbW = (h.Width + 15) / 16
 		d.mbH = (h.Height + 15) / 16
 		d.width, d.height = h.Width, h.Height
-	} else if d.mbW == 0 {
-		return ErrInvalid
 	}
 
 	h.Width, h.Height = d.width, d.height
