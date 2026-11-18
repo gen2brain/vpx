@@ -9,7 +9,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        go-version: [1.26.x]
+        go-version: [1.24.x, 1.26.x]
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     env:
@@ -34,7 +34,8 @@ jobs:
       if: matrix.os == 'ubuntu-latest'
       run: |
         GOARCH=arm64 go vet ./...
-        GOARCH=riscv64 GORISCV64=rva23u64 go vet ./...
+        GOARCH=riscv64 go vet ./...
+        if [ "${{ matrix.go-version }}" = "1.26.x" ]; then GOARCH=riscv64 GORISCV64=rva23u64 go vet ./...; fi
         GOARCH=386 go vet ./...
     - name: Test 386
       if: matrix.os == 'ubuntu-latest'
